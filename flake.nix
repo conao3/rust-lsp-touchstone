@@ -43,7 +43,7 @@
                 clippy
                 gnumake
                 jq
-                emacs-nox
+                (emacs-nox.pkgs.withPackages (epkgs: [ epkgs.lsp-mode ]))
                 neovim
                 lean4
                 rust-analyzer

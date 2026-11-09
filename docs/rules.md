@@ -49,14 +49,16 @@ The base protocol: a header part of `Name: value\r\n` fields ended by `\r\n`, th
 | `jsonrpc/unknown-shape` | error | A message is a request, a notification or a response. |
 | `jsonrpc/duplicate-request-id` | error | A side does not reuse the id of its own request that is still waiting. |
 | `jsonrpc/response-to-unknown-request` | error | A response answers a waiting request of the other side. |
+| `jsonrpc/request-never-answered` | error | Every request gets a response before the session ends, also when the handler fails or the request was cancelled. |
 
 ## Lifecycle
 
 | Code | Severity | Rule |
 |---|---|---|
-| `lifecycle/client-message-before-initialize-result` | error | Until the server answers `initialize`, the client sends nothing else (except `exit`). |
+| `lifecycle/client-message-before-initialize-result` | error | Until the server answers `initialize`, the client sends no other request or notification (except `exit`); responses to the server's requests are allowed. |
 | `lifecycle/server-message-before-initialize-result` | error | Until it answers `initialize`, the server sends only `window/showMessage`, `window/logMessage`, `telemetry/event`, `window/showMessageRequest` and `$/progress`. |
-| `lifecycle/client-message-after-shutdown` | error | After `shutdown`, the client sends only `exit`. |
+| `lifecycle/client-message-after-shutdown` | error | After `shutdown`, the client sends no request or notification but `exit`; responses to the server's requests are allowed. |
+| `lifecycle/exit-not-sent` | warning | After `shutdown` the client sends `exit`; a client that kills the server instead skips the server's own cleanup. |
 
 ## Types
 

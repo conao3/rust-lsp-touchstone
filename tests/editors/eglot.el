@@ -29,9 +29,11 @@
     (goto-char (point-min))
     (search-forward "main")
     (backward-char 2)
-    (jsonrpc-request server :textDocument/hover (eglot--TextDocumentPositionParams))
-    (jsonrpc-request server :textDocument/completion (eglot--CompletionParams))
-    (jsonrpc-request server :textDocument/definition (eglot--TextDocumentPositionParams))
+    ;; A request may fail on the server's side (ContentModified while indexing); that is a
+    ;; response, not a failure of the run.
+    (ignore-errors (jsonrpc-request server :textDocument/hover (eglot--TextDocumentPositionParams)))
+    (ignore-errors (jsonrpc-request server :textDocument/completion (eglot--CompletionParams)))
+    (ignore-errors (jsonrpc-request server :textDocument/definition (eglot--TextDocumentPositionParams)))
     (goto-char (point-max))
     (insert "// typed in eglot 😀\n")
     (eglot--signal-textDocument/didChange)

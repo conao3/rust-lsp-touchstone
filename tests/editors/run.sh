@@ -29,22 +29,39 @@ run() {
     command=$(jq -cn --arg bin "$bin" --arg record "$record" '[$bin, "proxy", "run-proxy", "--record-file", $record, "--server-command-args", "rust-analyzer"]')
   fi
   local env=(TOUCHSTONE_COMMAND="$command" TOUCHSTONE_FILE="$dir/src/main.rs" TOUCHSTONE_MODE="$mode")
+  local status=0
   case $editor in
-    eglot) env "${env[@]}" emacs -Q --batch -l "$root/tests/editors/eglot.el" > "$dir/editor.log" 2>&1 ;;
-    neovim) env "${env[@]}" nvim --headless --clean -u NONE -l "$root/tests/editors/nvim.lua" > "$dir/editor.log" 2>&1 ;;
+    eglot) env "${env[@]}" emacs -Q --batch -l "$root/tests/editors/eglot.el" > "$dir/editor.log" 2>&1 || status=$? ;;
+    lsp-mode) env "${env[@]}" emacs -Q --batch -l "$root/tests/editors/lsp-mode.el" > "$dir/editor.log" 2>&1 || status=$? ;;
+    neovim) env "${env[@]}" nvim --headless --clean -u NONE -l "$root/tests/editors/nvim.lua" > "$dir/editor.log" 2>&1 || status=$? ;;
   esac
+  if [ "$status" -ne 0 ]; then
+    printf '\n## %s, %s: the run failed (exit %s); see %s\n' "$editor" "$mode" "$status" "$dir/editor.log"
+    failed=1
+    return
+  fi
   local messages errors warnings
-  messages=$(wc -l < "$record")
-  errors=$(jq -s '[.[].Findings[] | select(.Severity == "error")] | length' "$record")
-  warnings=$(jq -s '[.[].Findings[] | select(.Severity == "warning")] | length' "$record")
+  # A message whose findings grow later is recorded again; the last line of a seq wins.
+  local final="$dir/final.json"
+  jq -s 'group_by(.Seq) | map(last)' "$record" > "$final"
+  messages=$(jq length "$final")
+  errors=$(jq '[.[].Findings[] | select(.Severity == "error")] | length' "$final")
+  warnings=$(jq '[.[].Findings[] | select(.Severity == "warning")] | length' "$final")
   printf '\n## %s, %s: %s messages, %s errors, %s warnings\n' "$editor" "$mode" "$messages" "$errors" "$warnings"
-  jq -rs '[.[] | . as $m | .Findings[] | {Severity, Code, Direction: $m.Direction, Method: ($m.Method // "")}]
+  jq -r '[.[] | . as $m | .Findings[] | {Severity, Code, Direction: $m.Direction, Method: ($m.Method // "")}]
     | group_by([.Severity, .Code, .Direction, .Method])
-    | map("- \(.[0].Severity) \(.[0].Code) (\(.[0].Direction) \(.[0].Method)): \(length)") | .[]' "$record"
+    | map("- \(.[0].Severity) \(.[0].Code) (\(.[0].Direction) \(.[0].Method)): \(length)") | .[]' "$final"
+  # An editor that kills the server after shutdown leaves no session end in the record.
+  jq -r 'if (map(select(.Method == "shutdown" and .Kind == "request")) | length) > 0
+      and (map(select(.Method == "exit")) | length) == 0
+    then "- note: no exit after shutdown; the editor ended the process" else empty end' "$final"
 }
 
-for editor in eglot neovim; do
+failed=0
+editors=${TOUCHSTONE_EDITORS:-eglot lsp-mode neovim}
+for editor in $editors; do
   for mode in server proxy; do
     run "$editor" "$mode"
   done
 done
+exit "$failed"

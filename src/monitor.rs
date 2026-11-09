@@ -118,6 +118,8 @@ struct Protocol {
     cancelled: HashSet<String>,
     initialize_answered: bool,
     shutdown_sent: bool,
+    shutdown_seq: Option<u64>,
+    exit_sent: bool,
     client_capabilities: Value,
     server_capabilities: Value,
     encoding: Option<Encoding>,
@@ -208,9 +210,11 @@ impl Monitor {
         message.findings.push(finding);
         let message = message.clone();
         drop(state);
-        let _ = self.events.send(Event::Message(Box::new(message)));
+        self.emit(&message);
     }
 
+    /// Ends the session: requests still waiting never got a response, and a `shutdown` without
+    /// an `exit` left the server to be ended another way.
     pub fn mark_exited(&self, exit_code: Option<i32>) {
         let mut state = self.state.lock().unwrap();
         if state.state == SessionState::Exited {
@@ -218,7 +222,54 @@ impl Monitor {
         }
         state.state = SessionState::Exited;
         state.exit_code = exit_code;
+        let protocol = &state.protocol;
+        let mut additions = Vec::new();
+        for (key, pending) in protocol
+            .pending_client
+            .iter()
+            .chain(protocol.pending_server.iter())
+        {
+            additions.push((
+                pending.seq,
+                Finding::new(
+                    Severity::Error,
+                    "jsonrpc/request-never-answered",
+                    format!(
+                        "{} (id {key}) got no response before the session ended",
+                        pending.method
+                    ),
+                    0,
+                ),
+            ));
+        }
+        if protocol.shutdown_sent
+            && !protocol.exit_sent
+            && let Some(seq) = protocol.shutdown_seq
+        {
+            additions.push((
+                seq,
+                Finding::new(
+                    Severity::Warning,
+                    "lifecycle/exit-not-sent",
+                    "the client did not send exit after shutdown; the server was ended another way"
+                        .to_string(),
+                    0,
+                ),
+            ));
+        }
+        additions.sort_by_key(|(seq, _)| *seq);
+        let mut changed = Vec::new();
+        for (seq, mut finding) in additions {
+            if let Some(message) = state.log.get_mut(seq as usize - 1) {
+                finding.offset = message.offset.unwrap_or_default();
+                message.findings.push(finding);
+                changed.push(message.clone());
+            }
+        }
         drop(state);
+        for message in changed {
+            self.emit(&message);
+        }
         let _ = self.events.send(Event::Session(self.info()));
     }
 
@@ -329,15 +380,21 @@ impl Monitor {
         mut state: std::sync::MutexGuard<'_, State>,
         message: LoggedMessage,
     ) -> LoggedMessage {
+        state.log.push(message.clone());
+        drop(state);
+        self.emit(&message);
+        message
+    }
+
+    /// Writes a message to the record and to subscribers. A message whose findings grow later is
+    /// written again with the same seq; the last line of a seq is the final one.
+    fn emit(&self, message: &LoggedMessage) {
         if let Some(record) = &self.record
-            && let Ok(line) = serde_json::to_string(&message)
+            && let Ok(line) = serde_json::to_string(message)
         {
             let _ = writeln!(record.lock().unwrap(), "{line}");
         }
-        state.log.push(message.clone());
-        drop(state);
         let _ = self.events.send(Event::Message(Box::new(message.clone())));
-        message
     }
 }
 
@@ -419,11 +476,14 @@ impl Check<'_> {
 
     fn lifecycle(&mut self, kind: Kind, method: &str) {
         let p = &self.protocol;
+        if self.from_client && matches!(kind, Kind::Response | Kind::Invalid) {
+            return;
+        }
         if self.from_client {
             if p.shutdown_sent && !(kind == Kind::Notification && method == "exit") {
                 self.error(
                     "lifecycle/client-message-after-shutdown",
-                    "after a shutdown request the client may only send the exit notification"
+                    "after a shutdown request the client may send no request or notification but exit"
                         .to_string(),
                 );
             } else if !p.initialize_answered
@@ -659,7 +719,13 @@ impl Check<'_> {
             "initialize" if self.from_client => {
                 self.protocol.client_capabilities = params["capabilities"].clone();
             }
-            "shutdown" if self.from_client => self.protocol.shutdown_sent = true,
+            "shutdown" if self.from_client => {
+                self.protocol.shutdown_sent = true;
+                self.protocol.shutdown_seq = key
+                    .as_ref()
+                    .and_then(|k| self.protocol.pending_client.get(k))
+                    .map(|p| p.seq);
+            }
             "client/registerCapability" if !self.from_client => {
                 for r in params["registrations"].as_array().into_iter().flatten() {
                     if let (Some(id), Some(m)) = (r["id"].as_str(), r["method"].as_str()) {
@@ -819,6 +885,7 @@ impl Check<'_> {
 
     fn on_notification(&mut self, method: &str, params: &Value) {
         match method {
+            "exit" if self.from_client => self.protocol.exit_sent = true,
             "textDocument/didOpen" if self.from_client => self.did_open(params),
             "textDocument/didChange" if self.from_client => self.did_change(params),
             "textDocument/didClose" if self.from_client => {
@@ -1485,6 +1552,46 @@ mod tests {
         assert_eq!(
             f.server(progress("t", "report")),
             vec!["progress/out-of-order"]
+        );
+    }
+
+    #[test]
+    fn the_end_of_a_session_reports_unanswered_requests_and_a_missing_exit() {
+        let mut f = Fixture::new(
+            json!({"workspace": {"didChangeWatchedFiles": {"dynamicRegistration": true}}}),
+            json!({}),
+        );
+        f.server(json!({"jsonrpc": "2.0", "id": 8, "method": "client/registerCapability", "params": {"registrations": [{"id": "r", "method": "workspace/didChangeWatchedFiles", "registerOptions": {"watchers": []}}]}}));
+        f.client(json!({"jsonrpc": "2.0", "id": 50, "method": "shutdown"}));
+        f.server(json!({"jsonrpc": "2.0", "id": 50, "result": null}));
+        assert!(
+            f.client(json!({"jsonrpc": "2.0", "id": 8, "result": null}))
+                .is_empty(),
+            "a response after shutdown is allowed"
+        );
+        f.server(json!({"jsonrpc": "2.0", "id": 9, "method": "client/registerCapability", "params": {"registrations": []}}));
+        f.monitor.mark_exited(None);
+        let codes: Vec<(String, Vec<&str>)> = f
+            .monitor
+            .messages(None)
+            .iter()
+            .filter(|m| !m.findings.is_empty())
+            .map(|m| {
+                (
+                    m.method.clone().unwrap_or_default(),
+                    m.findings.iter().map(|f| f.code).collect(),
+                )
+            })
+            .collect();
+        assert_eq!(
+            codes,
+            vec![
+                ("shutdown".to_string(), vec!["lifecycle/exit-not-sent"]),
+                (
+                    "client/registerCapability".to_string(),
+                    vec!["jsonrpc/request-never-answered"]
+                ),
+            ]
         );
     }
 
