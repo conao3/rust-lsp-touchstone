@@ -40,10 +40,51 @@ enum Command {
         #[command(subcommand)]
         command: FramingCommand,
     },
+    /// Check the messages between an editor and a language server.
+    Proxy {
+        #[command(subcommand)]
+        command: ProxyCommand,
+    },
+    /// Act as a strict language server for an editor.
+    Server {
+        #[command(subcommand)]
+        command: ServerCommand,
+    },
     /// Drive a language server as a strict client.
     Client {
         #[command(subcommand)]
         command: ClientCommand,
+    },
+}
+
+#[derive(Subcommand)]
+enum ProxyCommand {
+    /// Run a language server behind a checking proxy on stdio; give this command to an editor as
+    /// its language server. The web UI's URL goes to stderr.
+    RunProxy {
+        /// The language server and its arguments; put this parameter last.
+        #[arg(long, num_args = 1.., required = true, allow_hyphen_values = true)]
+        server_command_args: Vec<String>,
+        /// Serve a web UI that shows the session live on this port of 127.0.0.1 (0 picks one).
+        #[arg(long)]
+        web_ui_port: Option<u16>,
+        /// Append every message as one JSON line to this file.
+        #[arg(long)]
+        record_file: Option<PathBuf>,
+    },
+}
+
+#[derive(Subcommand)]
+enum ServerCommand {
+    /// Run the strict server on stdio; give this command to an editor as its language server.
+    /// The web UI's URL goes to stderr.
+    RunServer {
+        /// Serve a web UI that shows the session live on this port of 127.0.0.1 (0 picks one).
+        #[arg(long)]
+        web_ui_port: Option<u16>,
+        /// Append every message as one JSON line to this file.
+        #[arg(long)]
+        record_file: Option<PathBuf>,
     },
 }
 
@@ -80,7 +121,14 @@ struct CheckFramesResult {
 }
 
 fn main() -> ExitCode {
-    let cli = match Cli::try_parse() {
+    let mut args: Vec<std::ffi::OsString> = std::env::args_os().collect();
+    if args.len() > 2
+        && args.last().is_some_and(|a| a == "help")
+        && !args.iter().any(|a| a == "--server-command-args")
+    {
+        *args.last_mut().unwrap() = "--help".into();
+    }
+    let cli = match Cli::try_parse_from(args) {
         Ok(cli) => cli,
         Err(err) => {
             let usage = err.use_stderr();
@@ -108,6 +156,34 @@ fn run(cli: &Cli) -> io::Result<ExitCode> {
         Command::Client {
             command: ClientCommand::StartWebUi { port, record_file },
         } => start_web_ui(*port, record_file.as_deref()),
+        Command::Proxy {
+            command:
+                ProxyCommand::RunProxy {
+                    server_command_args,
+                    web_ui_port,
+                    record_file,
+                },
+        } => {
+            let code = lsp_touchstone::proxy::run(lsp_touchstone::proxy::ProxyOptions {
+                command: server_command_args.clone(),
+                record: open_record(record_file.as_deref())?,
+                web_ui_port: *web_ui_port,
+            })?;
+            Ok(ExitCode::from(u8::try_from(code).unwrap_or(1)))
+        }
+        Command::Server {
+            command:
+                ServerCommand::RunServer {
+                    web_ui_port,
+                    record_file,
+                },
+        } => {
+            let code = lsp_touchstone::server::run(lsp_touchstone::server::ServerOptions {
+                record: open_record(record_file.as_deref())?,
+                web_ui_port: *web_ui_port,
+            })?;
+            Ok(ExitCode::from(u8::try_from(code).unwrap_or(1)))
+        }
         Command::Client {
             command: ClientCommand::PrintGraphqlSchema,
         } => {
@@ -218,9 +294,7 @@ struct WebUiStarted {
 }
 
 fn start_web_ui(port: u16, record_file: Option<&Path>) -> io::Result<ExitCode> {
-    let record = record_file
-        .map(|path| File::options().create(true).append(true).open(path))
-        .transpose()?;
+    let record = open_record(record_file)?;
     let state = Arc::new(web::AppState::new(record)?);
     let runtime = tokio::runtime::Runtime::new()?;
     runtime.block_on(async {
@@ -233,4 +307,9 @@ fn start_web_ui(port: u16, record_file: Option<&Path>) -> io::Result<ExitCode> {
         axum::serve(listener, web::router(web::schema(state), addr)).await?;
         Ok(ExitCode::SUCCESS)
     })
+}
+
+fn open_record(path: Option<&Path>) -> io::Result<Option<File>> {
+    path.map(|path| File::options().create(true).append(true).open(path))
+        .transpose()
 }

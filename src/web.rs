@@ -24,13 +24,26 @@ use tokio_stream::wrappers::BroadcastStream;
 
 use crate::finding;
 use crate::jsonrpc;
-use crate::session::{self, Event, Session, SessionOptions};
+use crate::monitor::{self as session, Event, Monitor};
+use crate::session::{Session, SessionOptions};
 
 const INDEX_HTML: &str = include_str!("../ui/index.html");
 
 pub type ApiSchema = Schema<QueryRoot, MutationRoot, SubscriptionRoot>;
 
+#[derive(Enum, Copy, Clone, Eq, PartialEq)]
+pub enum UiMode {
+    /// The strict client: the page starts servers and sends messages.
+    Client,
+    /// The checking proxy between an editor and a server; the page only watches.
+    Proxy,
+    /// The strict server driven by an editor; the page only watches.
+    Server,
+}
+
 pub struct AppState {
+    mode: UiMode,
+    observed: Option<Arc<Monitor>>,
     session: Mutex<Option<Arc<Session>>>,
     next_session_id: Mutex<u64>,
     events: broadcast::Sender<Event>,
@@ -42,6 +55,8 @@ impl AppState {
     pub fn new(record: Option<File>) -> std::io::Result<Self> {
         let (events, _) = broadcast::channel(4096);
         Ok(AppState {
+            mode: UiMode::Client,
+            observed: None,
             session: Mutex::new(None),
             next_session_id: Mutex::new(1),
             events,
@@ -50,11 +65,46 @@ impl AppState {
         })
     }
 
+    /// A page that watches `monitor`, whose events go to `events`.
+    pub fn observing(
+        mode: UiMode,
+        monitor: Arc<Monitor>,
+        events: broadcast::Sender<Event>,
+    ) -> std::io::Result<Self> {
+        Ok(AppState {
+            mode,
+            observed: Some(monitor),
+            session: Mutex::new(None),
+            next_session_id: Mutex::new(1),
+            events,
+            record: None,
+            working_directory: std::env::current_dir()?,
+        })
+    }
+
     fn current(&self) -> Option<Arc<Session>> {
         self.session.lock().unwrap().clone()
     }
 
+    fn monitor(&self) -> Option<Arc<Monitor>> {
+        match &self.observed {
+            Some(monitor) => Some(Arc::clone(monitor)),
+            None => self.current().map(|s| Arc::clone(s.monitor())),
+        }
+    }
+
+    fn client_mode(&self) -> Result<()> {
+        if self.mode == UiMode::Client {
+            Ok(())
+        } else {
+            Err(Error::new(
+                "this page watches a proxy or the strict server; it cannot start servers or send messages",
+            ))
+        }
+    }
+
     fn running(&self) -> Result<Arc<Session>> {
+        self.client_mode()?;
         self.current()
             .ok_or_else(|| Error::new("no language server has been started"))
     }
@@ -147,6 +197,8 @@ pub struct Message {
     session_id: ID,
     seq: u64,
     direction: Direction,
+    /// The byte offset of the frame in its direction's stream; none for stderr lines.
+    offset: Option<u64>,
     time_ms: f64,
     kind: Option<MessageKind>,
     method: Option<String>,
@@ -167,6 +219,7 @@ impl From<&session::LoggedMessage> for Message {
             session_id: ID(m.session_id.to_string()),
             seq: m.seq,
             direction: m.direction.into(),
+            offset: m.offset,
             time_ms: m.time_ms,
             kind: m.kind.map(Into::into),
             method: m.method.clone(),
@@ -205,6 +258,8 @@ impl From<session::SessionInfo> for SessionInfo {
 
 #[derive(SimpleObject)]
 pub struct Environment {
+    /// What this page drives or watches.
+    mode: UiMode,
     /// The directory lsp-touchstone runs in, as an absolute path.
     working_directory: String,
     /// The same directory as a `file://` URI.
@@ -230,6 +285,7 @@ impl QueryRoot {
         let uri = url::Url::from_directory_path(dir)
             .map_err(|()| Error::new("the working directory is not an absolute path"))?;
         Ok(Environment {
+            mode: state.mode,
             working_directory: dir.display().to_string(),
             working_directory_uri: uri.as_str().trim_end_matches('/').to_string(),
         })
@@ -238,14 +294,14 @@ impl QueryRoot {
     /// The current session, if a language server has been started.
     async fn session(&self, ctx: &Context<'_>) -> Result<Option<SessionInfo>> {
         let state = ctx.data::<Arc<AppState>>()?;
-        Ok(state.current().map(|s| s.info().into()))
+        Ok(state.monitor().map(|m| m.info().into()))
     }
 
     /// The messages of the current session, after `afterSeq` when it is given.
     async fn messages(&self, ctx: &Context<'_>, after_seq: Option<u64>) -> Result<Vec<Message>> {
         let state = ctx.data::<Arc<AppState>>()?;
         Ok(state
-            .current()
+            .monitor()
             .map(|s| s.messages(after_seq).iter().map(Into::into).collect())
             .unwrap_or_default())
     }
@@ -272,6 +328,7 @@ impl MutationRoot {
         input: StartServerInput,
     ) -> Result<SessionInfo> {
         let state = ctx.data::<Arc<AppState>>()?;
+        state.client_mode()?;
         if let Some(old) = state.current() {
             old.kill()?;
         }
@@ -374,6 +431,20 @@ impl SubscriptionRoot {
             }),
         )
     }
+}
+
+/// Serves the page for `state` on 127.0.0.1:`port` from a thread of its own and returns its URL.
+pub fn serve_in_background(state: AppState, port: u16) -> std::io::Result<String> {
+    let runtime = tokio::runtime::Runtime::new()?;
+    let listener = runtime.block_on(tokio::net::TcpListener::bind(("127.0.0.1", port)))?;
+    let addr = listener.local_addr()?;
+    let schema = schema(Arc::new(state));
+    std::thread::spawn(move || {
+        runtime.block_on(async move {
+            let _ = axum::serve(listener, router(schema, addr)).await;
+        });
+    });
+    Ok(format!("http://127.0.0.1:{}/", addr.port()))
 }
 
 pub fn router(schema: ApiSchema, addr: SocketAddr) -> Router {

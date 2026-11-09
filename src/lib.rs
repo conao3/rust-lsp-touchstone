@@ -1,6 +1,12 @@
+pub mod document;
 pub mod finding;
 pub mod framing;
 pub mod jsonrpc;
+pub mod model;
+pub mod monitor;
 pub mod position;
+pub mod progress;
+pub mod proxy;
+pub mod server;
 pub mod session;
 pub mod web;

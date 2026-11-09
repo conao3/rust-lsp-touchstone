@@ -6,6 +6,10 @@ enum Direction {
 
 type Environment {
 	"""
+	What this page drives or watches.
+	"""
+	mode: UiMode!
+	"""
 	The directory lsp-touchstone runs in, as an absolute path.
 	"""
 	workingDirectory: String!
@@ -26,6 +30,10 @@ type Message {
 	sessionId: ID!
 	seq: Int!
 	direction: Direction!
+	"""
+	The byte offset of the frame in its direction's stream; none for stderr lines.
+	"""
+	offset: Int
 	timeMs: Float!
 	kind: MessageKind
 	method: String
@@ -133,6 +141,21 @@ type SubscriptionRoot {
 	The session's state whenever a server starts or exits.
 	"""
 	sessionChanged: SessionInfo!
+}
+
+enum UiMode {
+	"""
+	The strict client: the page starts servers and sends messages.
+	"""
+	CLIENT
+	"""
+	The checking proxy between an editor and a server; the page only watches.
+	"""
+	PROXY
+	"""
+	The strict server driven by an editor; the page only watches.
+	"""
+	SERVER
 }
 
 """

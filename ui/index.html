@@ -138,8 +138,9 @@ footer { border-top: 1px solid var(--border); padding: 0.25rem 1rem; font-size: 
 <body>
 <header>
   <h1>lsp-touchstone</h1>
+  <span id="mode" class="badge">client</span>
   <input id="command" placeholder="language server command, e.g. rust-analyzer" aria-label="Language server command">
-  <label title="Answer workspace/configuration and other server requests automatically"><input type="checkbox" id="auto-respond" checked> auto-respond</label>
+  <label id="auto-respond-label" title="Answer workspace/configuration and other server requests automatically"><input type="checkbox" id="auto-respond" checked> auto-respond</label>
   <button id="start" class="primary">Start</button>
   <button id="stop" disabled title="No language server is running">Stop</button>
   <span id="session-badge" class="badge">not started</span>
@@ -194,7 +195,7 @@ footer { border-top: 1px solid var(--border); padding: 0.25rem 1rem; font-size: 
 "use strict";
 const $ = (id) => document.getElementById(id);
 const ENDPOINT = "/api/graphql";
-const MESSAGE_FIELDS = "sessionId seq direction timeMs kind method id body pairedSeq auto findings { severity code message offset }";
+const MESSAGE_FIELDS = "sessionId seq direction offset timeMs kind method id body pairedSeq auto findings { severity code message offset }";
 const SESSION_FIELDS = "id command state exitCode autoRespond";
 const LANGUAGES = { rs: "rust", ts: "typescript", tsx: "typescriptreact", js: "javascript", jsx: "javascriptreact", py: "python", go: "go", el: "emacs-lisp", c: "c", h: "c", cpp: "cpp", hs: "haskell", lean: "lean", nix: "nix", md: "markdown", json: "json", toml: "toml", clj: "clojure" };
 
@@ -250,6 +251,21 @@ function shellSplit(text) {
   return words;
 }
 
+function applyMode(mode) {
+  state.mode = mode;
+  const watching = mode !== "CLIENT";
+  $("mode").textContent = mode.toLowerCase();
+  $("compose").hidden = watching;
+  for (const id of ["start", "stop", "auto-respond-label"]) $(id).hidden = watching;
+  $("command").readOnly = watching;
+  if (watching) {
+    $("command").title = mode === "PROXY"
+      ? "The language server behind the proxy; the editor drives this session"
+      : "The strict server; the editor drives this session";
+    document.title = `lsp-touchstone · ${mode.toLowerCase()}`;
+  }
+}
+
 function renderSession() {
   const s = state.session;
   const badge = $("session-badge");
@@ -265,11 +281,12 @@ function renderSession() {
     badge.className = "badge exited";
   }
   const reason = "No language server is running";
+  if (state.mode && state.mode !== "CLIENT") return;
   for (const id of ["stop", "send", "open"]) {
     $(id).disabled = !running;
     $(id).title = running ? "" : reason;
   }
-  if (s && !$("command").value) $("command").value = s.command.join(" ");
+  if (s && (!$("command").value || state.mode !== "CLIENT")) $("command").value = s.command.join(" ");
 }
 
 function findingBadges(m) {
@@ -372,7 +389,22 @@ function followTail() {
   });
 }
 
+function replaceMessage(m) {
+  const old = state.bySeq.get(m.seq);
+  const index = state.messages.indexOf(old);
+  state.errorCount += m.findings.filter((f) => f.severity === "ERROR").length
+    - old.findings.filter((f) => f.severity === "ERROR").length;
+  state.messages[index] = m;
+  state.bySeq.set(m.seq, m);
+  const tr = $("rows").querySelector(`tr[data-seq="${m.seq}"]`);
+  if (tr) tr.replaceWith(rowFor(m));
+  highlight();
+  if (state.selected === m.seq) renderDetail();
+  updateCounts();
+}
+
 function appendMessage(m) {
+  if (state.bySeq.has(m.seq)) { replaceMessage(m); return; }
   if (!remember(m)) return;
   if (matches(m)) {
     $("rows").append(rowFor(m));
@@ -624,8 +656,9 @@ function subscribe() {
 
 async function load() {
   try {
-    const data = await gql(`{ environment { workingDirectory workingDirectoryUri } session { ${SESSION_FIELDS} } messages { ${MESSAGE_FIELDS} } }`);
+    const data = await gql(`{ environment { mode workingDirectory workingDirectoryUri } session { ${SESSION_FIELDS} } messages { ${MESSAGE_FIELDS} } }`);
     state.env = data.environment;
+    applyMode(data.environment.mode);
     $("cwd").textContent = `working directory: ${data.environment.workingDirectory}`;
     state.session = data.session;
     if (data.session && data.session.id !== state.sessionId) resetFor(data.session.id);
