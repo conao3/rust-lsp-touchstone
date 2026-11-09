@@ -365,7 +365,7 @@ function renderList() {
 
 function updateCounts() {
   const errors = state.errorCount;
-  $("counts").textContent = `${state.messages.length} messages · ${errors} errors`;
+  $("counts").textContent = `${state.messages.length} message${state.messages.length === 1 ? "" : "s"} · ${errors} error${errors === 1 ? "" : "s"}`;
   $("counts").className = errors ? "badge error" : "badge";
   $("list-empty").hidden = state.messages.length > 0;
 }
