@@ -3,3 +3,4 @@ result
 .direnv
 .claude-dev
 /test-out
+node_modules

@@ -14,3 +14,10 @@ updates:
     groups:
       github-actions-minor-patch:
         update-types: [minor, patch]
+  - package-ecosystem: npm
+    directory: "/tests/editors/vscode"
+    schedule:
+      interval: weekly
+    groups:
+      npm-minor-patch:
+        update-types: [minor, patch]

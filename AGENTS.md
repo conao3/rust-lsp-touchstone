@@ -16,7 +16,8 @@ proxy, a strict client and a strict server sharing one set of rules.
   forwarding it, so a response is never logged before its request.
 - `src/model.rs`: the embedded meta model, its message definitions and capability bindings, and
   the type validator.
-- `src/document.rs`: lines and positions in a document's text.
+- `src/document.rs`: lines and positions in a document's text, and the replacement of a range of
+  characters, written and proved in a `lean!` block.
 - `src/progress.rs`: the progress token state machine, written and proved in a `lean!` block.
 - `src/session.rs`: the strict client: the server process, sending, and automatic answers to
   server requests.
@@ -32,8 +33,10 @@ proxy, a strict client and a strict server sharing one set of rules.
   proofs with `lake build` and generates Rust into `.lean-rust/cache/`.
 - `spec/metaModel.json`: the machine-readable specification (source commit in `spec/README.md`).
 - `docs/rules.md`: every finding code with its rule; `tests/rules.rs` keeps it in step with `src/`.
-- `docs/editors.md` and `tests/editors/`: the editor configurations and the batch scripts behind
-  `make check-editors`.
+- `docs/editors.md` and `tests/editors/`: the editor configurations and the scripts behind
+  `make check-editors` (eglot, lsp-mode, Neovim, Helix through tmux keystrokes, VS Code through
+  VSCodium, `xvfb-run` and `@vscode/test-electron`). The editors live in the `editors` dev shell
+  (`nix develop .#editors`); `tests/editors/vscode/node_modules` comes from `npm ci`.
 - `tests/strict_pair.rs`: the strict client against the strict server; no message may have an
   error.
 

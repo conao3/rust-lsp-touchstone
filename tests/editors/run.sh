@@ -34,6 +34,8 @@ run() {
     eglot) env "${env[@]}" emacs -Q --batch -l "$root/tests/editors/eglot.el" > "$dir/editor.log" 2>&1 || status=$? ;;
     lsp-mode) env "${env[@]}" emacs -Q --batch -l "$root/tests/editors/lsp-mode.el" > "$dir/editor.log" 2>&1 || status=$? ;;
     neovim) env "${env[@]}" nvim --headless --clean -u NONE -l "$root/tests/editors/nvim.lua" > "$dir/editor.log" 2>&1 || status=$? ;;
+    helix) env "${env[@]}" "$root/tests/editors/helix.sh" > "$dir/editor.log" 2>&1 || status=$? ;;
+    vscode) env "${env[@]}" TOUCHSTONE_VSCODE="$(dirname "$(readlink -f "$(command -v codium)")")/../lib/vscode/codium" xvfb-run -a node "$root/tests/editors/vscode/run.js" > "$dir/editor.log" 2>&1 || status=$? ;;
   esac
   if [ "$status" -ne 0 ]; then
     printf '\n## %s, %s: the run failed (exit %s); see %s\n' "$editor" "$mode" "$status" "$dir/editor.log"
@@ -58,7 +60,10 @@ run() {
 }
 
 failed=0
-editors=${TOUCHSTONE_EDITORS:-eglot lsp-mode neovim}
+editors=${TOUCHSTONE_EDITORS:-eglot lsp-mode neovim helix vscode}
+if [[ " $editors " == *" vscode "* ]] && [ ! -d "$root/tests/editors/vscode/node_modules" ]; then
+  npm ci --prefix "$root/tests/editors/vscode" > /dev/null
+fi
 for editor in $editors; do
   for mode in server proxy; do
     run "$editor" "$mode"

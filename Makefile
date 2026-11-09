@@ -4,12 +4,11 @@ check:
 	cargo clippy --all-targets -- -D warnings
 	cargo test
 
-# Runs eglot and Neovim against the strict server and against rust-analyzer behind the proxy
-# and prints the findings of each session (tests/editors/run.sh).
+# Runs eglot, lsp-mode, Neovim, Helix and VS Code against the strict server and against
+# rust-analyzer behind the proxy and prints the findings of each session (tests/editors/run.sh).
 .PHONY: check-editors
 check-editors:
-	cargo build
-	tests/editors/run.sh
+	nix develop .#editors --command bash -c 'cargo build && tests/editors/run.sh'
 
 .PHONY: fmt
 fmt:

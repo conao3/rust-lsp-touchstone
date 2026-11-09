@@ -17,7 +17,7 @@ directions, document synchronization, positions the server returns, cancellation
 Where the specification can be read in more than one way, the finding is a warning, not an
 error. Types and capability bindings come from the specification's `metaModel.json`
 ([spec/](spec/)), embedded and interpreted, never written by hand. Position encodings and the
-progress state machine are proved correct in Lean through [lean-rs](https://github.com/conao3/lean-rs).
+progress state machine and the replacement of a changed range are proved correct in Lean through [lean-rs](https://github.com/conao3/lean-rs).
 
 ## Usage
 
@@ -55,7 +55,8 @@ $ lsp-touchstone server run-server --web-ui-port 4319 --record-file session.ndjs
 
 Use it as the language server of any file type. Each feature is exercised only when the editor
 declared the capability for it. Its code actions run commands that send `workspace/applyEdit`.
-[docs/editors.md](docs/editors.md) has the configuration for eglot and Neovim and
+[docs/editors.md](docs/editors.md) has the configuration for eglot, lsp-mode, Neovim, Helix and
+VS Code and
 what each of them did.
 
 ### The web UI
@@ -86,8 +87,9 @@ $ nix build
 $ nix run . -- help
 ```
 
-`make check-editors` runs eglot and Neovim against the strict server and against rust-analyzer
-behind the proxy and prints the findings of each session.
+`make check-editors` runs eglot, lsp-mode, Neovim, Helix and VS Code (VSCodium) against the strict
+server and against rust-analyzer behind the proxy, in the `editors` dev shell, and prints the
+findings of each session.
 
 ## License
 

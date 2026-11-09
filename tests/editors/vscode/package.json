@@ -1,0 +1,20 @@
+{
+  "name": "lsp-touchstone-vscode-check",
+  "displayName": "lsp-touchstone check",
+  "description": "Drives vscode-languageclient against lsp-touchstone in a headless VS Code",
+  "version": "0.0.0",
+  "private": true,
+  "publisher": "lsp-touchstone",
+  "license": "Apache-2.0",
+  "engines": {
+    "vscode": "^1.90.0"
+  },
+  "main": "./extension.js",
+  "scripts": {
+    "check": "node run.js"
+  },
+  "dependencies": {
+    "@vscode/test-electron": "3.1.0",
+    "vscode-languageclient": "11.0.0"
+  }
+}

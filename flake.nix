@@ -20,7 +20,12 @@
       imports = [ inputs.treefmt-nix.flakeModule ];
 
       perSystem =
-        { pkgs, inputs', ... }:
+        {
+          config,
+          pkgs,
+          inputs',
+          ...
+        }:
         {
           packages.default = pkgs.rustPlatform.buildRustPackage {
             pname = "lsp-touchstone";
@@ -43,14 +48,25 @@
                 clippy
                 gnumake
                 jq
-                (emacs-nox.pkgs.withPackages (epkgs: [ epkgs.lsp-mode ]))
-                neovim
                 lean4
                 rust-analyzer
                 rustc
                 rustfmt
               ])
               ++ [ inputs'.lean-rs.packages.lean-rust ];
+          };
+
+          devShells.editors = pkgs.mkShell {
+            inputsFrom = [ config.devShells.default ];
+            packages = with pkgs; [
+              (emacs-nox.pkgs.withPackages (epkgs: [ epkgs.lsp-mode ]))
+              helix
+              neovim
+              nodejs
+              tmux
+              vscodium
+              xvfb-run
+            ];
           };
 
           treefmt.programs = {
