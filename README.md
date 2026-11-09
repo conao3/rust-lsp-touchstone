@@ -16,9 +16,34 @@ Where the specification can be read in more than one way, the finding is a warni
 error. Types and rules are generated from the specification's `metaModel.json`
 ([spec/](spec/)) and never written by hand.
 
-The current release checks the base protocol framing only.
+The strict client is driven from a web UI that shows every message live; the checking proxy and
+the strict server are not written yet.
 
 ## Usage
+
+### The strict client
+
+```console
+$ lsp-touchstone client start-web-ui --port 4317 --record-file session.ndjson
+{"Url":"http://127.0.0.1:4317/"}
+```
+
+Open the URL, enter the command of a language server (`rust-analyzer`) and press Start. Send
+requests, notifications or raw frames from templates or by hand, open files with `didOpen`, and
+watch every message in both directions, the server's stderr and the findings on each message as
+they happen. Selecting a request highlights its response. Requests from the server
+(`workspace/configuration`, `window/workDoneProgress/create` and others) are answered
+automatically unless auto-respond is off.
+
+The page talks to a GraphQL API at `/api/graphql` (`schema.graphql`); subscriptions use the
+`graphql-transport-ws` protocol. The server listens on 127.0.0.1 only and refuses requests whose
+`Host` or `Origin` is not its own, so other pages in the browser cannot start processes through
+it. `--record-file` appends every message as one JSON line.
+
+Checks on the live session: framing, JSON-RPC shape, request and response pairing, and the
+lifecycle around `initialize` and `shutdown`.
+
+### Recorded streams
 
 ```console
 $ lsp-touchstone framing check-frames --input-file recorded-stream.bin

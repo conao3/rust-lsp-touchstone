@@ -9,6 +9,14 @@ proxy, a strict client and a strict server sharing one set of rules.
   and exit codes 252/254/255.
 - `src/finding.rs`: a finding (severity, code, message, byte offset).
 - `src/framing.rs`: the base protocol framing reader and its checks.
+- `src/jsonrpc.rs`: classifying a message as a request, response or notification, with its checks.
+- `src/session.rs`: a strict client session: the server process, the message log, request and
+  response pairing, lifecycle checks and automatic answers to server requests.
+- `src/web.rs`: the GraphQL API (async-graphql on axum) and the Host and Origin check.
+  `schema.graphql` is its committed SDL; a test fails when it is stale
+  (`cargo run -- client print-graphql-schema > schema.graphql`).
+- `ui/index.html`: the single-page UI, embedded into the binary. Plain JavaScript; it speaks
+  GraphQL over `fetch` and `graphql-transport-ws`.
 - `src/position.rs`: resolving a `character` in a line for the UTF-8, UTF-16 and UTF-32 position
   encodings. The resolution and its theorems are Lean in a `lean!` block; `build.rs` checks the
   proofs with `lake build` and generates Rust into `.lean-rust/cache/`.
@@ -31,3 +39,7 @@ proxy, a strict client and a strict server sharing one set of rules.
 $ nix develop --command make check
 $ nix build
 ```
+
+UI changes are checked in a browser: start `client start-web-ui`, start `rust-analyzer`, send
+`initialize`, `initialized` and a `didOpen`, reload the page, stop the server, and confirm the
+browser console has no messages.

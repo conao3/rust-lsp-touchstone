@@ -1,0 +1,653 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>lsp-touchstone</title>
+<style>
+:root {
+  --bg: #ffffff;
+  --bg-subtle: #f6f8fa;
+  --bg-selected: #ddf4ff;
+  --bg-paired: #fff8c5;
+  --fg: #1f2328;
+  --fg-muted: #59636e;
+  --border: #d1d9e0;
+  --accent: #0969da;
+  --danger: #d1242f;
+  --danger-bg: #ffebe9;
+  --warning: #9a6700;
+  --warning-bg: #fff8c5;
+  --success: #1a7f37;
+  --font-mono: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #0d1117;
+    --bg-subtle: #151b23;
+    --bg-selected: #0c2d4b;
+    --bg-paired: #3a2f00;
+    --fg: #f0f6fc;
+    --fg-muted: #9198a1;
+    --border: #3d444d;
+    --accent: #4493f8;
+    --danger: #f85149;
+    --danger-bg: #3c1618;
+    --warning: #d29922;
+    --warning-bg: #3a2f00;
+    --success: #3fb950;
+  }
+}
+* { box-sizing: border-box; }
+html, body { height: 100%; margin: 0; }
+body {
+  background: var(--bg);
+  color: var(--fg);
+  font: 0.875rem/1.42857 system-ui, -apple-system, "Segoe UI", sans-serif;
+  display: grid;
+  grid-template-rows: auto 1fr auto;
+}
+header {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  align-items: center;
+  padding: 0.5rem 1rem;
+  border-bottom: 1px solid var(--border);
+  background: var(--bg-subtle);
+}
+header h1 { font-size: 1rem; margin: 0 0.5rem 0 0; }
+input, textarea, select, button {
+  font: inherit;
+  color: inherit;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+}
+input, select { height: 2rem; padding: 0 0.5rem; }
+textarea { padding: 0.5rem; font-family: var(--font-mono); font-size: 0.75rem; resize: vertical; }
+button { height: 2rem; padding: 0 0.75rem; cursor: pointer; background: var(--bg-subtle); }
+button.primary { background: var(--accent); border-color: var(--accent); color: #ffffff; }
+button:disabled { cursor: not-allowed; opacity: 0.5; }
+label { display: inline-flex; gap: 0.25rem; align-items: center; }
+#command { flex: 1 1 20rem; font-family: var(--font-mono); }
+.badge {
+  display: inline-block;
+  padding: 0 0.5rem;
+  border-radius: 999px;
+  font-size: 0.75rem;
+  border: 1px solid var(--border);
+  white-space: nowrap;
+}
+.badge.running { color: var(--success); border-color: var(--success); }
+.badge.exited, .badge.error { color: var(--danger); border-color: var(--danger); }
+.badge.warning { color: var(--warning); border-color: var(--warning); }
+main {
+  display: grid;
+  grid-template-columns: minmax(0, 3fr) minmax(0, 2fr);
+  min-height: 0;
+}
+#list-pane { display: grid; grid-template-rows: auto 1fr; min-height: 0; border-right: 1px solid var(--border); }
+.toolbar { display: flex; flex-wrap: wrap; gap: 0.5rem; align-items: center; padding: 0.5rem 1rem; border-bottom: 1px solid var(--border); }
+.toolbar input[type=search] { flex: 1 1 12rem; }
+#list { overflow: auto; min-height: 0; }
+table { border-collapse: collapse; width: 100%; font-size: 0.75rem; }
+th { position: sticky; top: 0; background: var(--bg-subtle); text-align: left; font-weight: 600; }
+th, td { padding: 0.25rem 0.5rem; border-bottom: 1px solid var(--border); white-space: nowrap; }
+td.method { font-family: var(--font-mono); overflow: hidden; text-overflow: ellipsis; max-width: 20rem; }
+td.num { text-align: right; font-variant-numeric: tabular-nums; color: var(--fg-muted); }
+tr { cursor: pointer; }
+tr.selected td { background: var(--bg-selected); }
+tr.paired td { background: var(--bg-paired); }
+tr.stderr td { color: var(--fg-muted); }
+.dir-out { color: var(--accent); }
+.dir-in { color: var(--success); }
+#side { display: grid; grid-template-rows: minmax(0, 1fr) auto; min-height: 0; }
+#detail { overflow: auto; padding: 0.75rem 1rem; min-height: 0; }
+#detail h2 { font-size: 0.875rem; margin: 0 0 0.5rem; }
+#detail .meta { color: var(--fg-muted); font-size: 0.75rem; margin-bottom: 0.5rem; }
+#detail pre {
+  font-family: var(--font-mono);
+  font-size: 0.75rem;
+  background: var(--bg-subtle);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 0.5rem;
+  white-space: pre-wrap;
+  word-break: break-word;
+  margin: 0;
+}
+.finding { border-radius: 6px; padding: 0.25rem 0.5rem; margin-bottom: 0.25rem; font-size: 0.75rem; }
+.finding.error { background: var(--danger-bg); color: var(--danger); }
+.finding.warning { background: var(--warning-bg); color: var(--warning); }
+.finding code { font-family: var(--font-mono); font-weight: 600; }
+a.link { color: var(--accent); cursor: pointer; text-decoration: underline; }
+#compose { border-top: 1px solid var(--border); padding: 0.75rem 1rem; display: grid; gap: 0.5rem; }
+#compose .row { display: flex; flex-wrap: wrap; gap: 0.5rem; align-items: center; }
+#compose input.grow { flex: 1 1 10rem; font-family: var(--font-mono); }
+#params { width: 100%; min-height: 8rem; }
+footer { border-top: 1px solid var(--border); padding: 0.25rem 1rem; font-size: 0.75rem; color: var(--fg-muted); display: flex; gap: 1rem; }
+#status.error { color: var(--danger); }
+.empty { color: var(--fg-muted); padding: 1rem; }
+@media (max-width: 48rem) {
+  main { grid-template-columns: minmax(0, 1fr); grid-template-rows: minmax(16rem, 1fr) auto; }
+  #list-pane { border-right: 0; border-bottom: 1px solid var(--border); }
+}
+</style>
+</head>
+<body>
+<header>
+  <h1>lsp-touchstone</h1>
+  <input id="command" placeholder="language server command, e.g. rust-analyzer" aria-label="Language server command">
+  <label title="Answer workspace/configuration and other server requests automatically"><input type="checkbox" id="auto-respond" checked> auto-respond</label>
+  <button id="start" class="primary">Start</button>
+  <button id="stop" disabled title="No language server is running">Stop</button>
+  <span id="session-badge" class="badge">not started</span>
+</header>
+<main>
+  <section id="list-pane">
+    <div class="toolbar">
+      <input type="search" id="filter" placeholder="filter by method, id or finding code" aria-label="Filter messages">
+      <label><input type="checkbox" id="show-stderr"> stderr</label>
+      <label><input type="checkbox" id="only-findings"> findings only</label>
+      <label><input type="checkbox" id="follow" checked> follow</label>
+      <span id="counts" class="badge">0 messages</span>
+    </div>
+    <div id="list">
+      <table>
+        <thead><tr><th>#</th><th>time</th><th></th><th>kind</th><th>method</th><th>id</th><th>findings</th></tr></thead>
+        <tbody id="rows"></tbody>
+      </table>
+      <div id="list-empty" class="empty">Start a language server to see its messages.</div>
+    </div>
+  </section>
+  <section id="side">
+    <div id="detail"><div class="empty">Select a message to see its content and findings.</div></div>
+    <form id="compose">
+      <div class="row">
+        <select id="template" aria-label="Template">
+          <option value="">template…</option>
+        </select>
+        <select id="send-kind" aria-label="Message kind">
+          <option value="request">request</option>
+          <option value="notification">notification</option>
+          <option value="raw">raw frame</option>
+        </select>
+        <input id="method" class="grow" placeholder="method" aria-label="Method">
+      </div>
+      <textarea id="params" placeholder="params (JSON); for a raw frame, the whole content" aria-label="Params"></textarea>
+      <div class="row">
+        <button id="send" type="submit" class="primary" disabled title="No language server is running">Send</button>
+        <input id="open-path" class="grow" placeholder="file to open, relative to the working directory" aria-label="File to open">
+        <input id="open-language" placeholder="languageId" aria-label="Language id" size="10">
+        <button id="open" type="button" disabled title="No language server is running">didOpen</button>
+      </div>
+    </form>
+  </section>
+</main>
+<footer>
+  <span id="connection">connecting…</span>
+  <span id="status"></span>
+  <span id="cwd"></span>
+</footer>
+<script>
+"use strict";
+const $ = (id) => document.getElementById(id);
+const ENDPOINT = "/api/graphql";
+const MESSAGE_FIELDS = "sessionId seq direction timeMs kind method id body pairedSeq auto findings { severity code message offset }";
+const SESSION_FIELDS = "id command state exitCode autoRespond";
+const LANGUAGES = { rs: "rust", ts: "typescript", tsx: "typescriptreact", js: "javascript", jsx: "javascriptreact", py: "python", go: "go", el: "emacs-lisp", c: "c", h: "c", cpp: "cpp", hs: "haskell", lean: "lean", nix: "nix", md: "markdown", json: "json", toml: "toml", clj: "clojure" };
+
+const state = {
+  sessionId: null,
+  session: null,
+  messages: [],
+  bySeq: new Map(),
+  errorCount: 0,
+  selected: null,
+  env: null,
+  lastUri: null,
+};
+
+async function gql(query, variables = {}) {
+  const response = await fetch(ENDPOINT, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ query, variables }),
+  });
+  const payload = await response.json();
+  if (payload.errors && payload.errors.length) {
+    throw new Error(payload.errors.map((e) => e.message).join("; "));
+  }
+  return payload.data;
+}
+
+function setStatus(text, isError = false) {
+  const el = $("status");
+  el.textContent = text;
+  el.className = isError ? "error" : "";
+}
+
+function shellSplit(text) {
+  const trimmed = text.trim();
+  if (trimmed.startsWith("[")) return JSON.parse(trimmed);
+  const words = [];
+  let current = "";
+  let quote = null;
+  let inWord = false;
+  for (const ch of trimmed) {
+    if (quote) {
+      if (ch === quote) quote = null; else current += ch;
+    } else if (ch === "'" || ch === '"') {
+      quote = ch; inWord = true;
+    } else if (/\s/.test(ch)) {
+      if (inWord) { words.push(current); current = ""; inWord = false; }
+    } else {
+      current += ch; inWord = true;
+    }
+  }
+  if (inWord) words.push(current);
+  return words;
+}
+
+function renderSession() {
+  const s = state.session;
+  const badge = $("session-badge");
+  const running = s && s.state === "RUNNING";
+  if (!s) {
+    badge.textContent = "not started";
+    badge.className = "badge";
+  } else if (running) {
+    badge.textContent = `running · session ${s.id}`;
+    badge.className = "badge running";
+  } else {
+    badge.textContent = `exited${s.exitCode === null ? "" : ` (${s.exitCode})`} · session ${s.id}`;
+    badge.className = "badge exited";
+  }
+  const reason = "No language server is running";
+  for (const id of ["stop", "send", "open"]) {
+    $(id).disabled = !running;
+    $(id).title = running ? "" : reason;
+  }
+  if (s && !$("command").value) $("command").value = s.command.join(" ");
+}
+
+function findingBadges(m) {
+  const errors = m.findings.filter((f) => f.severity === "ERROR").length;
+  const warnings = m.findings.length - errors;
+  const span = document.createElement("span");
+  if (errors) {
+    const b = document.createElement("span");
+    b.className = "badge error";
+    b.textContent = `${errors} error${errors > 1 ? "s" : ""}`;
+    span.append(b, " ");
+  }
+  if (warnings) {
+    const b = document.createElement("span");
+    b.className = "badge warning";
+    b.textContent = `${warnings} warning${warnings > 1 ? "s" : ""}`;
+    span.append(b);
+  }
+  return span;
+}
+
+function kindLabel(m) {
+  if (m.direction === "SERVER_STDERR") return "stderr";
+  if (!m.kind) return "not JSON";
+  return m.kind.toLowerCase() + (m.auto ? " (auto)" : "");
+}
+
+function arrow(m) {
+  const span = document.createElement("span");
+  if (m.direction === "CLIENT_TO_SERVER") { span.textContent = "→ server"; span.className = "dir-out"; }
+  else if (m.direction === "SERVER_TO_CLIENT") { span.textContent = "← server"; span.className = "dir-in"; }
+  else { span.textContent = "stderr"; }
+  return span;
+}
+
+function matches(m) {
+  if (m.direction === "SERVER_STDERR" && !$("show-stderr").checked) return false;
+  if ($("only-findings").checked && m.findings.length === 0) return false;
+  const q = $("filter").value.trim().toLowerCase();
+  if (!q) return true;
+  const hay = [m.method, m.id, m.direction === "SERVER_STDERR" ? m.body : "", ...m.findings.map((f) => f.code)].join(" ").toLowerCase();
+  return hay.includes(q);
+}
+
+function rowFor(m) {
+  const tr = document.createElement("tr");
+  tr.dataset.seq = m.seq;
+  if (m.direction === "SERVER_STDERR") tr.classList.add("stderr");
+  const cells = [
+    [String(m.seq), "num"],
+    [(m.timeMs / 1000).toFixed(3), "num"],
+    [arrow(m), ""],
+    [m.direction === "SERVER_STDERR" ? "" : kindLabel(m), ""],
+    [m.direction === "SERVER_STDERR" ? m.body : (m.method || ""), "method"],
+    [m.id || "", ""],
+    [findingBadges(m), ""],
+  ];
+  for (const [content, cls] of cells) {
+    const td = document.createElement("td");
+    if (cls) td.className = cls;
+    td.append(content);
+    tr.append(td);
+  }
+  tr.addEventListener("click", () => select(m.seq));
+  return tr;
+}
+
+function renderList() {
+  const rows = $("rows");
+  rows.replaceChildren(...state.messages.filter(matches).map(rowFor));
+  updateCounts();
+  highlight();
+}
+
+function updateCounts() {
+  const errors = state.errorCount;
+  $("counts").textContent = `${state.messages.length} messages · ${errors} errors`;
+  $("counts").className = errors ? "badge error" : "badge";
+  $("list-empty").hidden = state.messages.length > 0;
+}
+
+function remember(m) {
+  if (state.bySeq.has(m.seq)) return false;
+  state.bySeq.set(m.seq, m);
+  state.messages.push(m);
+  state.errorCount += m.findings.filter((f) => f.severity === "ERROR").length;
+  if (m.direction === "CLIENT_TO_SERVER" && m.method === "textDocument/didOpen") {
+    try { state.lastUri = JSON.parse(m.body).params.textDocument.uri; } catch (_) { /* not JSON */ }
+  }
+  return true;
+}
+
+let scrollPending = false;
+function followTail() {
+  if (!$("follow").checked || scrollPending) return;
+  scrollPending = true;
+  requestAnimationFrame(() => {
+    scrollPending = false;
+    $("list").scrollTop = $("list").scrollHeight;
+  });
+}
+
+function appendMessage(m) {
+  if (!remember(m)) return;
+  if (matches(m)) {
+    $("rows").append(rowFor(m));
+    followTail();
+  }
+  updateCounts();
+}
+
+function resetFor(sessionId) {
+  state.sessionId = sessionId;
+  state.messages = [];
+  state.bySeq = new Map();
+  state.errorCount = 0;
+  state.selected = null;
+  $("rows").replaceChildren();
+  renderDetail();
+  updateCounts();
+}
+
+function partnerSeqs(seq) {
+  const m = state.bySeq.get(seq);
+  const result = new Set();
+  if (!m) return result;
+  if (m.pairedSeq) result.add(m.pairedSeq);
+  for (const other of state.messages) if (other.pairedSeq === seq) result.add(other.seq);
+  return result;
+}
+
+function highlight() {
+  const partners = state.selected ? partnerSeqs(state.selected) : new Set();
+  for (const tr of $("rows").children) {
+    const seq = Number(tr.dataset.seq);
+    tr.classList.toggle("selected", seq === state.selected);
+    tr.classList.toggle("paired", partners.has(seq));
+  }
+}
+
+function select(seq) {
+  state.selected = seq;
+  highlight();
+  renderDetail();
+}
+
+function renderDetail() {
+  const detail = $("detail");
+  const m = state.selected && state.bySeq.get(state.selected);
+  if (!m) {
+    const empty = document.createElement("div");
+    empty.className = "empty";
+    empty.textContent = "Select a message to see its content and findings.";
+    detail.replaceChildren(empty);
+    return;
+  }
+  const h = document.createElement("h2");
+  h.textContent = `#${m.seq} ${kindLabel(m)} ${m.method || ""}`;
+  const meta = document.createElement("div");
+  meta.className = "meta";
+  meta.append(arrow(m), ` · ${(m.timeMs / 1000).toFixed(3)} s`);
+  if (m.id) meta.append(` · id ${m.id}`);
+  if (m.auto) meta.append(" · sent automatically");
+  for (const p of partnerSeqs(m.seq)) {
+    const a = document.createElement("a");
+    a.className = "link";
+    a.textContent = `#${p}`;
+    a.addEventListener("click", () => select(p));
+    meta.append(" · paired with ", a);
+  }
+  const findings = m.findings.map((f) => {
+    const div = document.createElement("div");
+    div.className = `finding ${f.severity.toLowerCase()}`;
+    const code = document.createElement("code");
+    code.textContent = f.code;
+    div.append(code, ` ${f.message} (byte ${f.offset})`);
+    return div;
+  });
+  const pre = document.createElement("pre");
+  try { pre.textContent = JSON.stringify(JSON.parse(m.body), null, 2); }
+  catch (_) { pre.textContent = m.body; }
+  const copy = document.createElement("button");
+  copy.type = "button";
+  copy.textContent = "Copy to compose";
+  copy.style.margin = "0 0 0.5rem";
+  copy.addEventListener("click", () => {
+    $("send-kind").value = "raw";
+    $("method").value = "";
+    $("params").value = m.body;
+    setStatus(`copied #${m.seq} to the compose form as a raw frame`);
+  });
+  detail.replaceChildren(h, meta, ...findings, copy, pre);
+}
+
+function templates() {
+  const root = state.env ? state.env.workingDirectoryUri : "file:///";
+  const uri = state.lastUri || `${root}/src/main.rs`;
+  const position = { textDocument: { uri }, position: { line: 0, character: 0 } };
+  return {
+    initialize: ["request", "initialize", {
+      processId: null,
+      clientInfo: { name: "lsp-touchstone", version: "0.1.0" },
+      rootUri: root,
+      workspaceFolders: [{ uri: root, name: "workspace" }],
+      capabilities: {
+        general: { positionEncodings: ["utf-16"] },
+        workspace: { configuration: true, workspaceFolders: true, applyEdit: false },
+        window: { workDoneProgress: true, showDocument: { support: false } },
+        textDocument: {
+          synchronization: { didSave: true },
+          hover: { contentFormat: ["markdown", "plaintext"] },
+          completion: { completionItem: { snippetSupport: false } },
+          definition: {},
+          references: {},
+          documentSymbol: { hierarchicalDocumentSymbolSupport: true },
+          publishDiagnostics: { relatedInformation: true },
+        },
+      },
+    }],
+    initialized: ["notification", "initialized", {}],
+    hover: ["request", "textDocument/hover", position],
+    completion: ["request", "textDocument/completion", position],
+    definition: ["request", "textDocument/definition", position],
+    documentSymbol: ["request", "textDocument/documentSymbol", { textDocument: { uri } }],
+    shutdown: ["request", "shutdown", null],
+    exit: ["notification", "exit", null],
+  };
+}
+
+function fillTemplates() {
+  const select = $("template");
+  for (const name of Object.keys(templates())) {
+    const option = document.createElement("option");
+    option.value = name;
+    option.textContent = name;
+    select.append(option);
+  }
+  select.addEventListener("change", () => {
+    const t = templates()[select.value];
+    if (!t) return;
+    const [kind, method, params] = t;
+    $("send-kind").value = kind;
+    $("method").value = method;
+    $("params").value = params === null ? "" : JSON.stringify(params, null, 2);
+    select.value = "";
+  });
+}
+
+async function start() {
+  let command;
+  try { command = shellSplit($("command").value); }
+  catch (e) { setStatus(`the command is not a JSON array: ${e.message}`, true); return; }
+  if (!command.length) { setStatus("enter the command of a language server", true); return; }
+  $("start").disabled = true;
+  setStatus(`starting ${command.join(" ")}…`);
+  try {
+    const data = await gql(`mutation($input: StartServerInput!) { startServer(input: $input) { ${SESSION_FIELDS} } }`,
+      { input: { command, autoRespond: $("auto-respond").checked } });
+    state.session = data.startServer;
+    if (state.sessionId !== state.session.id) resetFor(state.session.id);
+    renderSession();
+    setStatus(`started session ${state.session.id}`);
+  } catch (e) {
+    setStatus(`could not start: ${e.message}`, true);
+  } finally {
+    $("start").disabled = false;
+  }
+}
+
+async function stop() {
+  setStatus("stopping…");
+  try {
+    const data = await gql(`mutation { stopServer { ${SESSION_FIELDS} } }`);
+    state.session = data.stopServer;
+    renderSession();
+    setStatus("sent kill to the language server");
+  } catch (e) {
+    setStatus(`could not stop: ${e.message}`, true);
+  }
+}
+
+async function send(event) {
+  event.preventDefault();
+  const kind = $("send-kind").value;
+  const method = $("method").value.trim();
+  const params = $("params").value;
+  try {
+    let data;
+    if (kind === "raw") {
+      data = (await gql(`mutation($body: String!) { sendRaw(body: $body) { ${MESSAGE_FIELDS} } }`, { body: params })).sendRaw;
+    } else {
+      if (!method) { setStatus("enter a method", true); return; }
+      const field = kind === "request" ? "sendRequest" : "sendNotification";
+      data = (await gql(`mutation($method: String!, $params: String) { ${field}(method: $method, params: $params) { ${MESSAGE_FIELDS} } }`,
+        { method, params: params.trim() ? params : null }))[field];
+    }
+    appendMessage(data);
+    select(data.seq);
+    setStatus(`sent #${data.seq}${data.findings.length ? ` with ${data.findings.length} findings` : ""}`);
+  } catch (e) {
+    setStatus(`could not send: ${e.message}`, true);
+  }
+}
+
+async function openFile() {
+  const path = $("open-path").value.trim();
+  if (!path) { setStatus("enter the path of a file", true); return; }
+  const ext = path.split(".").pop();
+  const languageId = $("open-language").value.trim() || LANGUAGES[ext];
+  if (!languageId) { setStatus(`enter the languageId of .${ext} files`, true); return; }
+  try {
+    const data = (await gql(`mutation($path: String!, $languageId: String!) { openFile(path: $path, languageId: $languageId) { ${MESSAGE_FIELDS} } }`,
+      { path, languageId })).openFile;
+    appendMessage(data);
+    select(data.seq);
+    setStatus(`opened ${path} as ${languageId} (#${data.seq})`);
+  } catch (e) {
+    setStatus(`could not open: ${e.message}`, true);
+  }
+}
+
+function subscribe() {
+  const url = `${location.protocol === "https:" ? "wss" : "ws"}://${location.host}${ENDPOINT}`;
+  const ws = new WebSocket(url, "graphql-transport-ws");
+  ws.addEventListener("open", () => ws.send(JSON.stringify({ type: "connection_init" })));
+  ws.addEventListener("message", async (event) => {
+    const msg = JSON.parse(event.data);
+    if (msg.type === "connection_ack") {
+      ws.send(JSON.stringify({ id: "messages", type: "subscribe", payload: { query: `subscription { messages { ${MESSAGE_FIELDS} } }` } }));
+      ws.send(JSON.stringify({ id: "session", type: "subscribe", payload: { query: `subscription { sessionChanged { ${SESSION_FIELDS} } }` } }));
+      $("connection").textContent = "live";
+      await load();
+    } else if (msg.type === "ping") {
+      ws.send(JSON.stringify({ type: "pong" }));
+    } else if (msg.type === "next" && msg.id === "messages") {
+      const m = msg.payload.data.messages;
+      if (m.sessionId !== state.sessionId) resetFor(m.sessionId);
+      appendMessage(m);
+    } else if (msg.type === "next" && msg.id === "session") {
+      state.session = msg.payload.data.sessionChanged;
+      if (state.session.id !== state.sessionId) resetFor(state.session.id);
+      renderSession();
+    } else if (msg.type === "error") {
+      setStatus(`subscription error: ${JSON.stringify(msg.payload)}`, true);
+    }
+  });
+  ws.addEventListener("close", () => {
+    $("connection").textContent = "disconnected; reconnecting…";
+    setTimeout(subscribe, 1000);
+  });
+}
+
+async function load() {
+  try {
+    const data = await gql(`{ environment { workingDirectory workingDirectoryUri } session { ${SESSION_FIELDS} } messages { ${MESSAGE_FIELDS} } }`);
+    state.env = data.environment;
+    $("cwd").textContent = `working directory: ${data.environment.workingDirectory}`;
+    state.session = data.session;
+    if (data.session && data.session.id !== state.sessionId) resetFor(data.session.id);
+    for (const m of data.messages) remember(m);
+    renderList();
+    followTail();
+    renderSession();
+  } catch (e) {
+    setStatus(`could not load: ${e.message}`, true);
+  }
+}
+
+$("start").addEventListener("click", start);
+$("stop").addEventListener("click", stop);
+$("compose").addEventListener("submit", send);
+$("open").addEventListener("click", openFile);
+for (const id of ["filter", "show-stderr", "only-findings"]) $(id).addEventListener("input", renderList);
+$("command").addEventListener("keydown", (e) => { if (e.key === "Enter") start(); });
+fillTemplates();
+renderSession();
+updateCounts();
+subscribe();
+</script>
+</body>
+</html>

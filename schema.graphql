@@ -1,0 +1,150 @@
+enum Direction {
+	CLIENT_TO_SERVER
+	SERVER_TO_CLIENT
+	SERVER_STDERR
+}
+
+type Environment {
+	"""
+	The directory lsp-touchstone runs in, as an absolute path.
+	"""
+	workingDirectory: String!
+	"""
+	The same directory as a `file://` URI.
+	"""
+	workingDirectoryUri: String!
+}
+
+type Finding {
+	severity: Severity!
+	code: String!
+	message: String!
+	offset: Int!
+}
+
+type Message {
+	sessionId: ID!
+	seq: Int!
+	direction: Direction!
+	timeMs: Float!
+	kind: MessageKind
+	method: String
+	"""
+	The JSON-RPC id as JSON text (`1`, `"a"`).
+	"""
+	id: String
+	"""
+	The content of the frame as received or sent.
+	"""
+	body: String!
+	findings: [Finding!]!
+	"""
+	The request this message answers.
+	"""
+	pairedSeq: Int
+	"""
+	Whether lsp-touchstone sent this message on its own (an answer to a server request).
+	"""
+	auto: Boolean!
+}
+
+enum MessageKind {
+	REQUEST
+	RESPONSE
+	NOTIFICATION
+	INVALID
+}
+
+type MutationRoot {
+	"""
+	Starts a language server, stopping the current one.
+	"""
+	startServer(input: StartServerInput!): SessionInfo!
+	"""
+	Kills the language server process.
+	"""
+	stopServer: SessionInfo!
+	"""
+	Sends a request with the next id. `params` is JSON text.
+	"""
+	sendRequest(method: String!, params: String): Message!
+	"""
+	Sends a notification. `params` is JSON text.
+	"""
+	sendNotification(method: String!, params: String): Message!
+	"""
+	Sends `body` as the content of one frame without changing or validating it.
+	"""
+	sendRaw(body: String!): Message!
+	"""
+	Sends `textDocument/didOpen` with the contents of a file. `path` is relative to the
+	working directory unless it is absolute.
+	"""
+	openFile(path: String!, languageId: String!): Message!
+}
+
+type QueryRoot {
+	environment: Environment!
+	"""
+	The current session, if a language server has been started.
+	"""
+	session: SessionInfo
+	"""
+	The messages of the current session, after `afterSeq` when it is given.
+	"""
+	messages(afterSeq: Int): [Message!]!
+}
+
+type SessionInfo {
+	id: ID!
+	command: [String!]!
+	state: SessionState!
+	exitCode: Int
+	autoRespond: Boolean!
+}
+
+enum SessionState {
+	RUNNING
+	EXITED
+}
+
+enum Severity {
+	ERROR
+	WARNING
+}
+
+input StartServerInput {
+	"""
+	The program and its arguments.
+	"""
+	command: [String!]!
+	"""
+	Answer requests from the server (`workspace/configuration` and others) automatically.
+	"""
+	autoRespond: Boolean! = true
+}
+
+type SubscriptionRoot {
+	"""
+	Every message of every session as it is sent or received.
+	"""
+	messages: Message!
+	"""
+	The session's state whenever a server starts or exits.
+	"""
+	sessionChanged: SessionInfo!
+}
+
+"""
+Directs the executor to include this field or fragment only when the `if` argument is true.
+"""
+directive @include(if: Boolean!) on FIELD | FRAGMENT_SPREAD | INLINE_FRAGMENT
+"""
+Directs the executor to skip this field or fragment when the `if` argument is true.
+"""
+directive @skip(if: Boolean!) on FIELD | FRAGMENT_SPREAD | INLINE_FRAGMENT
+schema {
+	query: QueryRoot
+	mutation: MutationRoot
+	subscription: SubscriptionRoot
+}
