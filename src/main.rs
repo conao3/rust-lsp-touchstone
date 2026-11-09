@@ -1,6 +1,3 @@
-mod finding;
-mod framing;
-
 use std::fs::File;
 use std::io::{self, BufReader, Write};
 use std::path::PathBuf;
@@ -9,8 +6,8 @@ use std::process::ExitCode;
 use clap::{Parser, Subcommand, ValueEnum};
 use serde::Serialize;
 
-use finding::{Finding, Severity};
-use framing::{Frame, FrameReader, FramingError};
+use lsp_touchstone::finding::{Finding, Severity};
+use lsp_touchstone::framing::{Frame, FrameReader, FramingError};
 
 const EXIT_USAGE: u8 = 252;
 const EXIT_VIOLATION: u8 = 254;

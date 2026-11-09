@@ -8,5 +8,9 @@ repository = "https://github.com/conao3/rust-lsp-touchstone"
 
 [dependencies]
 clap = { version = "4", features = ["derive"] }
+lean-rust = "0.3.0"
 serde = { version = "1", features = ["derive"] }
 serde_json = { version = "1", features = ["preserve_order"] }
+
+[build-dependencies]
+lean-rust-build = "0.3.0"

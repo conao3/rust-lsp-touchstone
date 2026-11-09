@@ -5,6 +5,8 @@
     nixpkgs.url = "github:NixOS/nixpkgs/nixpkgs-unstable";
     flake-parts.url = "github:hercules-ci/flake-parts";
     treefmt-nix.url = "github:numtide/treefmt-nix";
+    lean-rs.url = "github:conao3/lean-rs/v0.3.0";
+    lean-rs.inputs.nixpkgs.follows = "nixpkgs";
   };
 
   outputs =
@@ -18,7 +20,7 @@
       imports = [ inputs.treefmt-nix.flakeModule ];
 
       perSystem =
-        { pkgs, ... }:
+        { pkgs, inputs', ... }:
         {
           packages.default = pkgs.rustPlatform.buildRustPackage {
             pname = "lsp-touchstone";
@@ -35,15 +37,18 @@
           };
 
           devShells.default = pkgs.mkShell {
-            packages = with pkgs; [
-              cargo
-              clippy
-              gnumake
-              jq
-              rust-analyzer
-              rustc
-              rustfmt
-            ];
+            packages =
+              (with pkgs; [
+                cargo
+                clippy
+                gnumake
+                jq
+                lean4
+                rust-analyzer
+                rustc
+                rustfmt
+              ])
+              ++ [ inputs'.lean-rs.packages.lean-rust ];
           };
 
           treefmt.programs = {

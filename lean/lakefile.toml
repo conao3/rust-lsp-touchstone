@@ -1,0 +1,6 @@
+name = "lsp_touchstone"
+defaultTargets = ["LeanRustGen"]
+
+[[lean_lib]]
+name = "LeanRustGen"
+globs = ["LeanRustGen.+"]
