@@ -945,7 +945,8 @@ impl Check<'_> {
                             );
                         }
                     }
-                    tracked.document.text.replace_range(start..end, text);
+                    tracked.document.text =
+                        document::replace(&tracked.document.text, start, end, text);
                 }
                 None => tracked.lost = true,
             }
