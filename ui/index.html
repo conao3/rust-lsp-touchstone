@@ -4,6 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>lsp-touchstone</title>
+<link rel="icon" href="data:,">
 <style>
 :root {
   --bg: #ffffff;
@@ -39,6 +40,7 @@
   }
 }
 * { box-sizing: border-box; }
+[hidden] { display: none !important; }
 html, body { height: 100%; margin: 0; }
 body {
   background: var(--bg);
@@ -280,13 +282,13 @@ function renderSession() {
     badge.textContent = `exited${s.exitCode === null ? "" : ` (${s.exitCode})`} · session ${s.id}`;
     badge.className = "badge exited";
   }
-  const reason = "No language server is running";
+  if (s && (!$("command").value || state.mode !== "CLIENT")) $("command").value = s.command.join(" ");
   if (state.mode && state.mode !== "CLIENT") return;
+  const reason = "No language server is running";
   for (const id of ["stop", "send", "open"]) {
     $(id).disabled = !running;
     $(id).title = running ? "" : reason;
   }
-  if (s && (!$("command").value || state.mode !== "CLIENT")) $("command").value = s.command.join(" ");
 }
 
 function findingBadges(m) {

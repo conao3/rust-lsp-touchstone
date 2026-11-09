@@ -83,10 +83,9 @@ fn forward(monitor: &Monitor, from: impl io::Read, to: &mut impl io::Write, dire
     loop {
         match reader.read_frame() {
             Ok(Some(frame)) => {
-                let written = write_frame(to, &frame.body);
                 let body = String::from_utf8_lossy(&frame.body).into_owned();
                 monitor.observe(direction, body, frame.offset, frame.findings, false);
-                if written.is_err() {
+                if write_frame(to, &frame.body).is_err() {
                     return;
                 }
             }

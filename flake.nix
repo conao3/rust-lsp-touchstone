@@ -43,6 +43,8 @@
                 clippy
                 gnumake
                 jq
+                emacs-nox
+                neovim
                 lean4
                 rust-analyzer
                 rustc

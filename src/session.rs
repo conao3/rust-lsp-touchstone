@@ -206,18 +206,21 @@ impl Session {
         let stdin = writer.stdin.as_mut().ok_or_else(|| {
             io::Error::new(io::ErrorKind::BrokenPipe, "the server's stdin is closed")
         })?;
-        let written = match write_frame(stdin, body.as_bytes()) {
-            Ok(n) => n,
+        let offset = writer.offset;
+        let bytes = body.clone().into_bytes();
+        let logged =
+            self.monitor
+                .observe(Direction::ClientToServer, body, offset, Vec::new(), auto);
+        match write_frame(stdin, &bytes) {
+            Ok(written) => {
+                writer.offset += written;
+                Ok(logged)
+            }
             Err(err) => {
                 writer.stdin = None;
-                return Err(err);
+                Err(err)
             }
-        };
-        let offset = writer.offset;
-        writer.offset += written;
-        Ok(self
-            .monitor
-            .observe(Direction::ClientToServer, body, offset, Vec::new(), auto))
+        }
     }
 
     fn read_server(&self, stdout: impl Read) {

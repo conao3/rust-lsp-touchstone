@@ -154,12 +154,16 @@ impl<W: Write> Server<W> {
 
     fn send(&mut self, message: Value) -> io::Result<LoggedMessage> {
         let body = message.to_string();
-        let written = write_frame(&mut self.out, body.as_bytes())?;
-        let offset = self.offset;
-        self.offset += written;
-        Ok(self
-            .monitor
-            .observe(Direction::ServerToClient, body, offset, Vec::new(), false))
+        let bytes = body.clone().into_bytes();
+        let logged = self.monitor.observe(
+            Direction::ServerToClient,
+            body,
+            self.offset,
+            Vec::new(),
+            false,
+        );
+        self.offset += write_frame(&mut self.out, &bytes)?;
+        Ok(logged)
     }
 
     fn send_request(&mut self, method: &str, params: Value, purpose: Purpose) -> io::Result<()> {
