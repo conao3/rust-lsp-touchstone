@@ -1,8 +1,9 @@
 //! The life of a work done progress token: `begin`, any number of `report`s, then `end`.
 //!
 //! The transition function and its properties are written and proved in Lean (`lean!`): nothing
-//! is accepted after `end`, the only way out of a created token is `begin`, and every
-//! `begin`, `report`*, `end` sequence is accepted.
+//! is accepted after `end`, the only way out of a created token is `begin`, a begun token
+//! accepts only `report` and `end` (so a second `begin` is rejected), and every `begin`,
+//! `report`*, `end` sequence is accepted.
 
 lean_rust::lean! {
     /// The progress token state machine, proved in Lean.
@@ -37,6 +38,10 @@ lean_rust::lean! {
 
     theorem only_begin_leaves_created (k : ProgressKind) (s : TokenState)
         (h : step .created k = some s) : k = .begin ∧ s = .begun := by
+      cases k <;> simp [step] at h ⊢ <;> exact h.symm
+
+    theorem only_report_or_end_leave_begun (k : ProgressKind) (s : TokenState)
+        (h : step .begun k = some s) : (k = .report ∧ s = .begun) ∨ (k = .finish ∧ s = .ended) := by
       cases k <;> simp [step] at h ⊢ <;> exact h.symm
 
     theorem begun_never_returns_to_created (k : ProgressKind) :

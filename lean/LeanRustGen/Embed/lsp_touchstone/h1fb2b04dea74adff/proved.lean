@@ -31,6 +31,10 @@ theorem only_begin_leaves_created (k : ProgressKind) (s : TokenState)
     (h : step .created k = some s) : k = .begin ∧ s = .begun := by
   cases k <;> simp [step] at h ⊢ <;> exact h.symm
 
+theorem only_report_or_end_leave_begun (k : ProgressKind) (s : TokenState)
+    (h : step .begun k = some s) : (k = .report ∧ s = .begun) ∨ (k = .finish ∧ s = .ended) := by
+  cases k <;> simp [step] at h ⊢ <;> exact h.symm
+
 theorem begun_never_returns_to_created (k : ProgressKind) :
     step .begun k ≠ some .created := by
   cases k <;> simp [step]

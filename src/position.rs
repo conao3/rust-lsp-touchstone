@@ -3,8 +3,10 @@
 //!
 //! The resolution and its properties are written and proved in Lean (`lean!`): converting a
 //! character count to code units and back is the identity, a position past the end of the line
-//! is clamped to the line length, and a position inside a multi-unit character is reported with
-//! the character it splits.
+//! is clamped to the line length, a position inside a multi-unit character is reported with the
+//! character it splits and every such position is reported, and the width of a character is its
+//! UTF-8 byte count, two UTF-16 code units exactly when it takes four UTF-8 bytes, and one UTF-32
+//! code unit.
 
 lean_rust::lean! {
     /// The resolution of a `character` in a line, proved in Lean.
@@ -106,6 +108,43 @@ lean_rust::lean! {
               have := ih (n - unitWidth e c) k hr
               simp only [List.length_cons, offsetList]
               omega
+
+    theorem unitWidth_spec (c : Char) :
+        unitWidth .utf8 c = c.utf8Size ∧
+          unitWidth .utf16 c = (if c.utf8Size = 4 then 2 else 1) ∧
+          unitWidth .utf32 c = 1 := by
+      refine ⟨rfl, ?_, rfl⟩
+      simp only [unitWidth, Char.utf8Size]
+      have := UInt32.lt_iff_toNat_lt (a := c.val) (b := 0x10000)
+      simp only [UInt32.le_iff_toNat_le] at *
+      split <;> split <;> (try split) <;> (try split) <;> simp_all <;> omega
+
+    theorem resolve_inside (e : Encoding) (cs : List Char) (i n : Nat) (hi : i < cs.length)
+        (h1 : offsetList e cs i < n) (h2 : n < offsetList e cs (i + 1)) :
+        resolveList e cs n = .splitsChar i := by
+      induction cs generalizing n i with
+      | nil => simp at hi
+      | cons c cs ih =>
+        have hw := unitWidth_pos e c
+        cases i with
+        | zero =>
+          have h0 : offsetList e cs 0 = 0 := by cases cs <;> rfl
+          simp only [offsetList, h0] at h1 h2
+          simp only [resolveList]
+          split
+          · omega
+          · split
+            · rfl
+            · omega
+        | succ i =>
+          simp only [List.length_cons] at hi
+          simp only [offsetList] at h1 h2
+          simp only [resolveList]
+          split
+          · omega
+          · split
+            · omega
+            · rw [ih i (n - unitWidth e c) (by omega) (by omega) (by omega)]; rfl
 
     def resolve (e : Encoding) (line : String) (character : Nat) : Resolution :=
       resolveList e line.toList character

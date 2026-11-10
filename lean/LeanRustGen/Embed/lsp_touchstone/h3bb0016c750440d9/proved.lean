@@ -97,6 +97,43 @@ theorem resolve_splits (e : Encoding) (cs : List Char) (n i : Nat)
           simp only [List.length_cons, offsetList]
           omega
 
+theorem unitWidth_spec (c : Char) :
+    unitWidth .utf8 c = c.utf8Size ∧
+      unitWidth .utf16 c = (if c.utf8Size = 4 then 2 else 1) ∧
+      unitWidth .utf32 c = 1 := by
+  refine ⟨rfl, ?_, rfl⟩
+  simp only [unitWidth, Char.utf8Size]
+  have := UInt32.lt_iff_toNat_lt (a := c.val) (b := 0x10000)
+  simp only [UInt32.le_iff_toNat_le] at *
+  split <;> split <;> (try split) <;> (try split) <;> simp_all <;> omega
+
+theorem resolve_inside (e : Encoding) (cs : List Char) (i n : Nat) (hi : i < cs.length)
+    (h1 : offsetList e cs i < n) (h2 : n < offsetList e cs (i + 1)) :
+    resolveList e cs n = .splitsChar i := by
+  induction cs generalizing n i with
+  | nil => simp at hi
+  | cons c cs ih =>
+    have hw := unitWidth_pos e c
+    cases i with
+    | zero =>
+      have h0 : offsetList e cs 0 = 0 := by cases cs <;> rfl
+      simp only [offsetList, h0] at h1 h2
+      simp only [resolveList]
+      split
+      · omega
+      · split
+        · rfl
+        · omega
+    | succ i =>
+      simp only [List.length_cons] at hi
+      simp only [offsetList] at h1 h2
+      simp only [resolveList]
+      split
+      · omega
+      · split
+        · omega
+        · rw [ih i (n - unitWidth e c) (by omega) (by omega) (by omega)]; rfl
+
 def resolve (e : Encoding) (line : String) (character : Nat) : Resolution :=
   resolveList e line.toList character
 
