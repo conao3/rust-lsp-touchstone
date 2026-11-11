@@ -4,3 +4,4 @@ result
 .claude-dev
 /test-out
 node_modules
+/mutants.out*

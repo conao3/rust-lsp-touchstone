@@ -1623,4 +1623,251 @@ mod tests {
                 .is_empty()
         );
     }
+
+    #[test]
+    fn a_finding_added_later_is_recorded_and_sent_again() {
+        let path = std::env::temp_dir().join(format!(
+            "lsp-touchstone-add-finding-{}.ndjson",
+            std::process::id()
+        ));
+        let _ = std::fs::remove_file(&path);
+        let record = File::options()
+            .create(true)
+            .append(true)
+            .open(&path)
+            .unwrap();
+        let (events, mut receiver) = broadcast::channel(64);
+        let monitor = Monitor::new(1, vec![], false, events, Some(Arc::new(Mutex::new(record))));
+        let logged = monitor.observe(
+            Direction::ClientToServer,
+            json!({"jsonrpc": "2.0", "method": "initialized", "params": {}}).to_string(),
+            7,
+            Vec::new(),
+            false,
+        );
+        monitor.add_finding(
+            logged.seq,
+            Finding::new(
+                Severity::Error,
+                "client/apply-edit-not-reflected",
+                "x".to_string(),
+                0,
+            ),
+        );
+
+        let findings = &monitor.messages(None)[0].findings;
+        assert_eq!(
+            findings.last().unwrap().code,
+            "client/apply-edit-not-reflected"
+        );
+        assert_eq!(findings.last().unwrap().offset, 7);
+
+        let lines: Vec<Value> = std::fs::read_to_string(&path)
+            .unwrap()
+            .lines()
+            .map(|l| serde_json::from_str(l).unwrap())
+            .collect();
+        std::fs::remove_file(&path).unwrap();
+        assert_eq!(lines.len(), 2);
+        assert_eq!(lines[0]["Seq"], lines[1]["Seq"]);
+        assert_eq!(
+            lines[1]["Findings"].as_array().unwrap().last().unwrap()["Code"],
+            "client/apply-edit-not-reflected"
+        );
+
+        let mut sent = Vec::new();
+        while let Ok(event) = receiver.try_recv() {
+            if let Event::Message(message) = event {
+                sent.push(message.findings.len());
+            }
+        }
+        assert_eq!(sent.last(), Some(&(findings.len())));
+        assert!(sent.len() >= 2);
+    }
+
+    #[test]
+    fn a_server_cannot_initialize_the_client() {
+        let mut f = Fixture::new(json!({}), json!({}));
+        f.server(json!({"jsonrpc": "2.0", "id": 3, "method": "initialize", "params": {"processId": null, "rootUri": null, "capabilities": {"workspace": {"diagnostics": {"refreshSupport": true}}}}}));
+        assert_eq!(
+            f.server(json!({"jsonrpc": "2.0", "id": 4, "method": "workspace/diagnostic/refresh"})),
+            vec!["capability/client-did-not-declare"]
+        );
+    }
+
+    #[test]
+    fn a_progress_create_answered_by_the_server_does_not_ready_the_token() {
+        let mut f = Fixture::new(json!({"window": {"workDoneProgress": true}}), json!({}));
+        f.server(json!({"jsonrpc": "2.0", "id": 9, "method": "window/workDoneProgress/create", "params": {"token": "t"}}));
+        f.client(json!({"jsonrpc": "2.0", "id": 9, "method": "window/workDoneProgress/create", "params": {"token": "t"}}));
+        f.server(json!({"jsonrpc": "2.0", "id": 9, "result": null}));
+        assert_eq!(
+            f.server(json!({"jsonrpc": "2.0", "method": "$/progress", "params": {"token": "t", "value": {"kind": "begin", "title": "t"}}})),
+            vec!["progress/before-create-response"]
+        );
+    }
+
+    fn session_end(f: &Fixture) -> Vec<&'static str> {
+        f.monitor.mark_exited(None);
+        f.monitor
+            .messages(None)
+            .iter()
+            .flat_map(|m| m.findings.iter().map(|x| x.code))
+            .filter(|c| *c == "lifecycle/exit-not-sent")
+            .collect()
+    }
+
+    #[test]
+    fn only_the_client_sends_exit() {
+        let mut f = Fixture::new(json!({}), json!({}));
+        f.client_request("shutdown", Value::Null);
+        f.server(json!({"jsonrpc": "2.0", "id": f.next_id, "result": null}));
+        f.server(json!({"jsonrpc": "2.0", "method": "exit"}));
+        assert_eq!(session_end(&f), vec!["lifecycle/exit-not-sent"]);
+
+        let mut f = Fixture::new(json!({}), json!({}));
+        f.client_request("shutdown", Value::Null);
+        f.server(json!({"jsonrpc": "2.0", "id": f.next_id, "result": null}));
+        assert!(
+            f.client(json!({"jsonrpc": "2.0", "method": "exit"}))
+                .is_empty()
+        );
+        assert!(session_end(&f).is_empty());
+    }
+
+    #[test]
+    fn document_notifications_from_the_server_leave_the_mirror_alone() {
+        let wrong = vec!["types/wrong-direction"];
+        let mut f = Fixture::new(json!({}), json!({"textDocumentSync": 2}));
+        assert_eq!(
+            f.server(json!({"jsonrpc": "2.0", "method": "textDocument/didOpen", "params": {"textDocument": {"uri": "file:///a", "languageId": "rust", "version": 1, "text": "x"}}})),
+            wrong
+        );
+        f.open("abc\n");
+        assert_eq!(
+            f.server(json!({"jsonrpc": "2.0", "method": "textDocument/didChange", "params": {"textDocument": {"uri": "file:///a", "version": 2}, "contentChanges": [{"range": range(0, 0, 0, 1), "text": "z"}]}})),
+            wrong
+        );
+        assert_eq!(
+            f.server(json!({"jsonrpc": "2.0", "method": "textDocument/didSave", "params": {"textDocument": {"uri": "file:///a"}, "text": "other"}})),
+            wrong
+        );
+        assert_eq!(
+            f.server(json!({"jsonrpc": "2.0", "method": "textDocument/didClose", "params": {"textDocument": {"uri": "file:///a"}}})),
+            wrong
+        );
+        assert!(
+            f.notify(
+                "textDocument/didChange",
+                json!({"textDocument": {"uri": "file:///a", "version": 2}, "contentChanges": [{"range": range(0, 0, 0, 1), "text": "y"}]})
+            )
+            .is_empty()
+        );
+        assert_eq!(f.monitor.document("file:///a").unwrap().text, "ybc\n");
+    }
+
+    fn hover(f: &mut Fixture) -> Vec<&'static str> {
+        f.client_request(
+            "textDocument/hover",
+            json!({"textDocument": {"uri": "file:///a"}, "position": {"line": 0, "character": 0}}),
+        )
+    }
+
+    #[test]
+    fn requests_of_the_other_side_leave_the_lifecycle_and_registrations_alone() {
+        let wrong = vec!["types/wrong-direction"];
+        let mut f = Fixture::new(
+            json!({"textDocument": {"hover": {"dynamicRegistration": true}}}),
+            json!({"hoverProvider": true}),
+        );
+        f.server(json!({"jsonrpc": "2.0", "id": 3, "method": "shutdown"}));
+        assert!(hover(&mut f).is_empty());
+
+        let mut f = Fixture::new(
+            json!({"textDocument": {"hover": {"dynamicRegistration": true}}}),
+            json!({}),
+        );
+        let registration = json!({"registrations": [{"id": "r", "method": "textDocument/hover"}]});
+        assert_eq!(
+            f.client_request("client/registerCapability", registration.clone()),
+            wrong
+        );
+        assert_eq!(hover(&mut f), vec!["capability/server-did-not-declare"]);
+
+        f.server(json!({"jsonrpc": "2.0", "id": 4, "method": "client/registerCapability", "params": registration}));
+        let unregistration =
+            json!({"unregisterations": [{"id": "r", "method": "textDocument/hover"}]});
+        assert_eq!(
+            f.client_request("client/unregisterCapability", unregistration.clone()),
+            wrong
+        );
+        assert!(hover(&mut f).is_empty());
+        f.server(json!({"jsonrpc": "2.0", "id": 5, "method": "client/unregisterCapability", "params": unregistration}));
+        assert_eq!(hover(&mut f), vec!["capability/server-did-not-declare"]);
+    }
+
+    #[test]
+    fn only_the_server_creates_progress_tokens() {
+        let mut f = Fixture::new(json!({"window": {"workDoneProgress": true}}), json!({}));
+        let progress = |token: &str| json!({"jsonrpc": "2.0", "method": "$/progress", "params": {"token": token, "value": {"kind": "begin", "title": "t"}}});
+        assert_eq!(
+            f.client_request("window/workDoneProgress/create", json!({"token": "c"})),
+            vec!["types/wrong-direction"]
+        );
+        assert_eq!(f.server(progress("c")), vec!["progress/unknown-token"]);
+        assert!(f.client(progress("c")).is_empty());
+
+        let create = |id: i64| json!({"jsonrpc": "2.0", "id": id, "method": "window/workDoneProgress/create", "params": {"token": "t"}});
+        assert!(f.server(create(20)).is_empty());
+        assert_eq!(f.server(create(21)), vec!["progress/token-already-exists"]);
+    }
+
+    #[test]
+    fn a_response_ends_the_partial_result_tokens_of_its_request() {
+        let mut f = Fixture::new(
+            json!({"window": {"workDoneProgress": true}}),
+            json!({"referencesProvider": {"workDoneProgress": true}}),
+        );
+        f.client_request(
+            "textDocument/references",
+            json!({"textDocument": {"uri": "file:///a"}, "position": {"line": 0, "character": 0}, "context": {"includeDeclaration": true}, "workDoneToken": "w", "partialResultToken": "p"}),
+        );
+        f.server(json!({"jsonrpc": "2.0", "id": f.next_id, "result": []}));
+        let progress = |token: &str| json!({"jsonrpc": "2.0", "method": "$/progress", "params": {"token": token, "value": {"kind": "begin", "title": "t"}}});
+        assert_eq!(f.server(progress("p")), vec!["progress/unknown-token"]);
+        assert!(f.server(progress("w")).is_empty());
+    }
+
+    #[test]
+    fn the_client_cannot_answer_initialize() {
+        let mut f = Fixture::new(json!({}), json!({}));
+        f.server(json!({"jsonrpc": "2.0", "id": 3, "method": "initialize", "params": {"processId": null, "rootUri": null, "capabilities": {}}}));
+        f.client(
+            json!({"jsonrpc": "2.0", "id": 3, "result": {"capabilities": {"hoverProvider": true}}}),
+        );
+        assert_eq!(hover(&mut f), vec!["capability/server-did-not-declare"]);
+    }
+
+    #[test]
+    fn edits_and_diagnostics_are_checked_only_from_the_server() {
+        let wrong = vec!["types/wrong-direction"];
+        let mut f = Fixture::new(
+            json!({"workspace": {"applyEdit": true}}),
+            json!({"textDocumentSync": 2}),
+        );
+        f.open("abc\n");
+        let edit = json!({"edit": {"changes": {"file:///a": [{"range": range(5, 0, 5, 1), "newText": "x"}]}}});
+        assert_eq!(f.client_request("workspace/applyEdit", edit.clone()), wrong);
+        assert_eq!(
+            f.server(
+                json!({"jsonrpc": "2.0", "id": 30, "method": "workspace/applyEdit", "params": edit})
+            ),
+            vec!["positions/line-out-of-range"]
+        );
+        let diagnostics = json!({"uri": "file:///a", "diagnostics": [{"range": range(5, 0, 5, 1), "message": "m"}]});
+        assert_eq!(
+            f.notify("textDocument/publishDiagnostics", diagnostics),
+            wrong
+        );
+    }
 }

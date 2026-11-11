@@ -98,3 +98,30 @@ fn forward(monitor: &Monitor, from: impl io::Read, to: &mut impl io::Write, dire
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn frames_are_checked_and_forwarded_unchanged() {
+        let first = r#"{"jsonrpc":"2.0","method":"initialized","params":{}}"#;
+        let second = r#"{"jsonrpc":"2.0","method":"exit"}"#;
+        let frame = |body: &str| format!("Content-Length: {}\r\n\r\n{body}", body.len());
+        let input = frame(first) + &frame(second);
+        let (events, _) = broadcast::channel(64);
+        let monitor = Monitor::new(1, vec![], false, events, None);
+        let mut output = Vec::new();
+        forward(
+            &monitor,
+            input.as_bytes(),
+            &mut output,
+            Direction::ClientToServer,
+        );
+        assert_eq!(String::from_utf8(output).unwrap(), input);
+        let messages = monitor.messages(None);
+        assert_eq!(messages.len(), 2);
+        assert_eq!(messages[1].method.as_deref(), Some("exit"));
+        assert_eq!(messages[1].offset, Some(frame(first).len() as u64));
+    }
+}

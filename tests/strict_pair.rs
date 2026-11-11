@@ -133,6 +133,15 @@ fn the_strict_client_and_the_strict_server_agree() {
     });
 
     let messages = session.messages(None);
+    let mut expected = 0;
+    for sent in messages
+        .iter()
+        .filter(|m| m.direction == lsp_touchstone::monitor::Direction::ClientToServer)
+    {
+        assert_eq!(sent.offset, Some(expected));
+        expected +=
+            (format!("Content-Length: {}\r\n\r\n", sent.body.len()).len() + sent.body.len()) as u64;
+    }
     let errors: Vec<_> = messages
         .iter()
         .flat_map(|m| m.findings.iter().map(move |f| (m.seq, m.method.clone(), f)))

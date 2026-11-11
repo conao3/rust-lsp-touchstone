@@ -596,3 +596,52 @@ impl<W: Write> Server<W> {
         )
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn frame(message: Value) -> String {
+        let body = message.to_string();
+        format!("Content-Length: {}\r\n\r\n{body}", body.len())
+    }
+
+    #[test]
+    fn requests_get_their_own_ids_and_frames_their_offsets() {
+        let input = [
+            frame(
+                json!({"jsonrpc": "2.0", "id": 1, "method": "initialize", "params": {"processId": null, "rootUri": null, "capabilities": {"window": {"workDoneProgress": true}, "workspace": {"configuration": true, "didChangeWatchedFiles": {"dynamicRegistration": true}}}}}),
+            ),
+            frame(json!({"jsonrpc": "2.0", "method": "initialized", "params": {}})),
+        ]
+        .concat();
+        let (events, _) = broadcast::channel(256);
+        let monitor = Arc::new(Monitor::new(1, vec![], false, events, None));
+        let mut server = Server::new(Arc::clone(&monitor), Vec::new());
+        assert_eq!(server.serve(input.as_bytes()).unwrap(), 1);
+
+        let sent: Vec<_> = monitor
+            .messages(None)
+            .into_iter()
+            .filter(|m| m.direction == Direction::ServerToClient)
+            .collect();
+        let mut expected = 0;
+        for message in &sent {
+            assert_eq!(message.offset, Some(expected));
+            expected += (format!("Content-Length: {}\r\n\r\n", message.body.len()).len()
+                + message.body.len()) as u64;
+        }
+        assert_eq!(expected, server.out.len() as u64);
+
+        let ids: Vec<_> = sent
+            .iter()
+            .filter(|m| m.kind == Some(jsonrpc::Kind::Request))
+            .map(|m| m.id.clone().unwrap())
+            .collect();
+        assert!(ids.len() >= 3, "{ids:?}");
+        let mut unique = ids.clone();
+        unique.sort();
+        unique.dedup();
+        assert_eq!(unique.len(), ids.len(), "{ids:?}");
+    }
+}
