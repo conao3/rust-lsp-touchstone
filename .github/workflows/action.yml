@@ -32,6 +32,7 @@ jobs:
         uses: $/
         with:
           mode: client
+          probe-undeclared-requests: "true"
           fail-on-error: "false"
           record-file: opencode.ndjson
           command: |

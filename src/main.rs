@@ -8,7 +8,7 @@ use std::time::Duration;
 use clap::{Parser, Subcommand, ValueEnum};
 use serde::Serialize;
 
-use lsp_touchstone::check::{self, Outcome, Report, ServerCheck};
+use lsp_touchstone::check::{self, Outcome, Party, Report, ServerCheck};
 use lsp_touchstone::finding::{Finding, Severity};
 use lsp_touchstone::framing::{Frame, FrameReader, FramingError};
 use lsp_touchstone::web;
@@ -74,6 +74,11 @@ enum CheckCommand {
         /// The record file to write; it is emptied first.
         #[arg(long)]
         record_file: PathBuf,
+        /// Make the strict server also send the requests the client did not declare
+        /// (`workspace/configuration`, `client/registerCapability`,
+        /// `window/workDoneProgress/create`), to see whether the client answers every request.
+        #[arg(long)]
+        probe_undeclared_requests: bool,
         /// The client and its arguments; put this parameter last.
         #[arg(long, num_args = 1.., required = true, allow_hyphen_values = true)]
         client_command_args: Vec<String>,
@@ -104,7 +109,27 @@ enum CheckCommand {
     CheckRecord {
         #[arg(long)]
         record_file: PathBuf,
+        /// The side whose findings count: `client`, `server` or `both`.
+        #[arg(long, value_enum, default_value_t = Target::Both)]
+        target: Target,
     },
+}
+
+#[derive(Clone, Copy, ValueEnum)]
+enum Target {
+    Client,
+    Server,
+    Both,
+}
+
+impl From<Target> for Party {
+    fn from(target: Target) -> Party {
+        match target {
+            Target::Client => Party::Client,
+            Target::Server => Party::Server,
+            Target::Both => Party::Both,
+        }
+    }
 }
 
 #[derive(Subcommand)]
@@ -132,6 +157,11 @@ enum ServerCommand {
         /// Serve a web UI that shows the session live on this port of 127.0.0.1 (0 picks one).
         #[arg(long)]
         web_ui_port: Option<u16>,
+        /// Also send `workspace/configuration`, `client/registerCapability` and
+        /// `window/workDoneProgress/create` when the client did not declare them, to see whether
+        /// the client answers every request. The server's own messages then have errors.
+        #[arg(long, env = "LSP_TOUCHSTONE_PROBE_UNDECLARED_REQUESTS")]
+        probe_undeclared_requests: bool,
         /// Append every message as one JSON line to this file.
         #[arg(long, env = "LSP_TOUCHSTONE_RECORD_FILE")]
         record_file: Option<PathBuf>,
@@ -227,12 +257,14 @@ fn run(cli: &Cli) -> io::Result<ExitCode> {
             command:
                 ServerCommand::RunServer {
                     web_ui_port,
+                    probe_undeclared_requests,
                     record_file,
                 },
         } => {
             let code = lsp_touchstone::server::run(lsp_touchstone::server::ServerOptions {
                 record: open_record(record_file.as_deref())?,
                 web_ui_port: *web_ui_port,
+                probe_undeclared_requests: *probe_undeclared_requests,
             })?;
             Ok(ExitCode::from(u8::try_from(code).unwrap_or(1)))
         }
@@ -246,10 +278,11 @@ fn run(cli: &Cli) -> io::Result<ExitCode> {
             command:
                 CheckCommand::CheckClient {
                     record_file,
+                    probe_undeclared_requests,
                     client_command_args,
                 },
         } => print_report(
-            &check::check_client(client_command_args, record_file)?,
+            &check::check_client(client_command_args, record_file, *probe_undeclared_requests)?,
             cli.output,
         ),
         Command::Check {
@@ -274,8 +307,23 @@ fn run(cli: &Cli) -> io::Result<ExitCode> {
             cli.output,
         ),
         Command::Check {
-            command: CheckCommand::CheckRecord { record_file },
-        } => print_report(&check::score_record(record_file)?, cli.output),
+            command:
+                CheckCommand::CheckRecord {
+                    record_file,
+                    target,
+                },
+        } => print_report(
+            &check::score_record(record_file, (*target).into())?,
+            cli.output,
+        ),
+    }
+}
+
+fn party_name(party: Party) -> &'static str {
+    match party {
+        Party::Client => "client",
+        Party::Server => "server",
+        Party::Both => "both",
     }
 }
 
@@ -298,20 +346,36 @@ fn print_report(report: &Report, output: Output) -> io::Result<ExitCode> {
             for f in &report.findings {
                 writeln!(
                     out,
-                    "{}\t{}\t{}\t{}\t{}",
-                    f.session_id, f.seq, f.severity, f.code, f.message
+                    "{}\t{}\t{}\t{}\t{}\t{}",
+                    f.session_id,
+                    f.seq,
+                    party_name(f.party),
+                    f.severity,
+                    f.code,
+                    f.message
                 )?;
             }
         }
         Output::Table => {
             writeln!(
                 out,
-                "{}, {} in {} (record: {})",
+                "{}: {}, {} in {} (record: {})",
+                match report.target {
+                    Party::Both => "client and server".to_string(),
+                    party => party_name(party).to_string(),
+                },
                 count(report.errors, "error"),
                 count(report.warnings, "warning"),
                 count(report.sessions.len(), "session"),
                 report.record_file
             )?;
+            if report.counterpart_findings > 0 {
+                writeln!(
+                    out,
+                    "{} on the strict counterpart, not counted",
+                    count(report.counterpart_findings, "finding")
+                )?;
+            }
             let rows: Vec<[String; 4]> = report
                 .rules
                 .iter()
@@ -320,7 +384,10 @@ fn print_report(report: &Report, output: Output) -> io::Result<ExitCode> {
                     let first = report
                         .findings
                         .iter()
-                        .find(|f| f.code == r.code)
+                        .find(|f| {
+                            f.code == r.code
+                                && (report.target == Party::Both || f.party == report.target)
+                        })
                         .map(|f| f.message.clone())
                         .unwrap_or_default();
                     [

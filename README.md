@@ -115,16 +115,30 @@ $ lsp-touchstone --output table check check-record --record-file client.ndjson
 `check-client` runs a client that is configured to start `lsp-touchstone server run-server` as
 its language server, waits for it to exit and scores every session the strict server recorded. The
 strict server finds the record file through the `LSP_TOUCHSTONE_RECORD_FILE` environment variable,
-so the client's configuration needs no path. The client's standard output goes to stderr.
-`check-server` drives a language server with the strict client: `initialize`, `didOpen` of each
+so the client's configuration needs no path. The client's standard output goes to stderr. With
+`--probe-undeclared-requests` the strict server also sends `window/workDoneProgress/create`,
+`client/registerCapability` and `workspace/configuration` to a client that did not declare them,
+to see whether the client answers every request (`LSP_TOUCHSTONE_PROBE_UNDECLARED_REQUESTS`
+carries the switch to the server). `check-server` drives a language server with the strict client: `initialize`, `didOpen` of each
 `--open-file`, `documentSymbol` and `hover` when the server declares them, `shutdown` and `exit`.
-`check-record` scores a record written by any mode.
+`check-record` scores a record written by any mode; `--target client|server|both` (`both`)
+chooses the side whose findings count.
 
-Each session in the record is replayed through the checks and ended, so a session whose server
-was killed still gets the findings that only its end decides (requests never answered, no
-`shutdown`, no `exit`). The report lists every rule of [docs/rules.md](docs/rules.md) with its
-count and an outcome: `violated` (an error), `warned` or `no-finding`. A rule with no finding may
-not have been exercised. The exit code is 254 when a session has an error.
+Each finding is about one side: the sender of the message, the receiver of a request that was
+never answered, and for the end of a session the side that ended it. `check-client` counts the
+client's findings and `check-server` the server's; the strict counterpart's findings stay in the
+report as `CounterpartFindings` (the probes above give the strict server errors of its own).
+
+When a session ends, the record gets a `SessionEnd` line with the side that ended it: the client
+by closing the stream or ending the server's process, or the server by exiting on its own. A
+client that ends the session without `shutdown` or `exit` gets `lifecycle/shutdown-not-sent` or
+`lifecycle/exit-not-sent`; a server that exits before `exit` gets
+`lifecycle/server-exited-without-exit`. Each session in the record is replayed through the checks
+and ended by that side, so a session whose recording process was killed (by the client) still
+gets the findings that only its end decides. The report lists every rule of
+[docs/rules.md](docs/rules.md) with its count and an outcome: `violated` (an error), `warned` or
+`no-finding`. A rule with no finding may not have been exercised. The exit code is 254 when the
+side under test has an error.
 
 [docs/agents.md](docs/agents.md) has the configuration for opencode and Claude Code, and what each
 of them did.
@@ -144,8 +158,8 @@ of them did.
 The action builds lsp-touchstone with Nix, runs `check check-client` (`mode: client`) or
 `check check-server` (`mode: server`), writes the table to the job summary and annotates each
 finding. `command` takes one argument per line. Inputs: `record-file`
-(`lsp-touchstone.ndjson`), `open-files`, `language-id`, `fail-on-error` (`true`) and `install-nix`
-(`true`). Outputs: `errors`, `warnings`, `record-file` and `report-file` (the JSON report).
+(`lsp-touchstone.ndjson`), `open-files`, `language-id`, `probe-undeclared-requests` (`false`,
+`mode: client` only), `fail-on-error` (`true`) and `install-nix` (`true`). Outputs: `errors`, `warnings`, `record-file` and `report-file` (the JSON report).
 [.github/workflows/action.yml](.github/workflows/action.yml) runs it on the strict server and on
 opencode.
 

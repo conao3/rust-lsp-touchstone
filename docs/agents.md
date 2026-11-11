@@ -6,8 +6,10 @@ The configurations are in [tests/agents/](../tests/agents/). Each agent starts
 [tests/agents/sample.tch](../tests/agents/sample.tch).
 
 The strict server exercises a feature only when the client declared the capability for it, so a
-rule with no finding may not have been exercised. The tables list the rules with a finding and
-the features the session exercised.
+rule with no finding may not have been exercised. With `--probe-undeclared-requests` it also sends
+`window/workDoneProgress/create`, `client/registerCapability` and `workspace/configuration` to a
+client that did not declare them; the client must still answer every request. The tables list the
+rules with a finding on the client and the features the session exercised.
 
 ## Results
 
@@ -23,6 +25,21 @@ Two of the three Claude Code runs edited the file; the third found it already ed
 | `lifecycle/shutdown-not-sent` | warned (1): the client ends the server without `shutdown` | warned (1): the same | no finding |
 | `lifecycle/exit-not-sent` | no finding | no finding | warned (1): `shutdown` is answered, then the server is ended before an `exit` arrives |
 
+With `--probe-undeclared-requests`, three more runs each:
+
+| Request from the server | opencode (declared) | Claude Code (not declared) |
+|---|---|---|
+| `window/workDoneProgress/create` | answered with a result | answered with the error -32601 `Unhandled method window/workDoneProgress/create` |
+| `client/registerCapability` | answered with a result | answered with `null`; its debug log says it ignores the registration |
+| `workspace/configuration` (2 items) | answered with `[null, null]` in the diagnostics run; not answered in the document-symbols run (`jsonrpc/request-never-answered`, as without the probes) | answered with `[null, null]` |
+| Findings on the client | the same as without the probes | the same as without the probes: no `jsonrpc/request-never-answered` |
+
+Claude Code answers every request, so the missing handlers of
+[anthropics/claude-code#16360](https://github.com/anthropics/claude-code/issues/16360) (reported on
+2.0.76) do not show on 2.1.319. The probes are requests the strict server sends after
+`initialized`; the strict server's own `capability/client-did-not-declare` errors on them (3 per
+run) are counted on the server, not the client.
+
 What each session exercised:
 
 | Feature | opencode | Claude Code |
@@ -34,8 +51,8 @@ What each session exercised:
 | Requests | `textDocument/documentSymbol` | `textDocument/documentSymbol`, `textDocument/hover` |
 
 Claude Code's debug log (`--debug-file`) shows `Sending notification 'exit'` and `LSP client
-stopped` in the same millisecond in all three runs, and the strict server never read the
-`exit`. Claude Code answers no server-to-client request here because it declares none of the
+stopped` within one millisecond in all six runs, and the strict server never read the `exit`.
+Without the probes, Claude Code gets no server-to-client request, because it declares none of the
 capabilities the strict server needs to send one.
 
 ## How to run
@@ -52,6 +69,8 @@ $ cd tests/agents
 $ lsp-touchstone --output table check check-client --record-file /tmp/opencode-diagnostics.ndjson --client-command-args opencode debug lsp diagnostics sample.tch
 $ lsp-touchstone --output table check check-client --record-file /tmp/opencode-symbols.ndjson --client-command-args opencode debug lsp document-symbols "file://$PWD/sample.tch"
 ```
+
+Add `--probe-undeclared-requests` after `check-client` to send the probes.
 
 `.github/workflows/action.yml` runs both in CI.
 

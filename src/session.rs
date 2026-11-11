@@ -5,6 +5,7 @@ use std::fs::File;
 use std::io::{self, BufRead, BufReader, Read, Write};
 use std::path::Path;
 use std::process::{Child, ChildStdin, Command, ExitStatus, Stdio};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::Duration;
@@ -14,8 +15,8 @@ use tokio::sync::broadcast;
 
 use crate::framing::{FrameReader, FramingError};
 use crate::jsonrpc::Kind;
-use crate::monitor::Monitor;
 pub use crate::monitor::{Direction, Event, LoggedMessage, SessionInfo, SessionState};
+use crate::monitor::{EndedBy, Monitor};
 
 pub struct SessionOptions {
     pub command: Vec<String>,
@@ -33,6 +34,8 @@ pub struct Session {
     auto_respond: bool,
     child: Mutex<Child>,
     writer: Mutex<Writer>,
+    /// Set when this client kills the server, so the session counts as ended by the client.
+    killed: AtomicBool,
 }
 
 /// Spawns `command` with piped stdio.
@@ -104,6 +107,7 @@ impl Session {
                 offset: 0,
                 next_request_id: 1,
             }),
+            killed: AtomicBool::new(false),
         });
 
         let reader = Arc::clone(&session);
@@ -135,6 +139,7 @@ impl Session {
             match child.try_wait()? {
                 Some(status) => status,
                 None => {
+                    self.killed.store(true, Ordering::SeqCst);
                     child.kill()?;
                     child.wait()?
                 }
@@ -146,7 +151,12 @@ impl Session {
 
     fn exited(&self, status: ExitStatus) {
         self.writer.lock().unwrap().stdin = None;
-        self.monitor.mark_exited(status.code());
+        let ended_by = if self.killed.load(Ordering::SeqCst) {
+            EndedBy::Client
+        } else {
+            EndedBy::Server
+        };
+        self.monitor.mark_exited(status.code(), ended_by);
     }
 
     pub fn send_request(&self, method: &str, params: Option<Value>) -> io::Result<LoggedMessage> {

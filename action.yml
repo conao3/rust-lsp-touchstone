@@ -23,6 +23,9 @@ inputs:
   language-id:
     description: In `server` mode, the languageId of the opened files.
     default: plaintext
+  probe-undeclared-requests:
+    description: In `client` mode, make the strict server also send the requests the client did not declare.
+    default: "false"
   fail-on-error:
     description: Fail the step when a session has an error.
     default: "true"
@@ -62,12 +65,17 @@ runs:
         OPEN_FILES: ${{ inputs.open-files }}
         LANGUAGE_ID: ${{ inputs.language-id }}
         FAIL_ON_ERROR: ${{ inputs.fail-on-error }}
+        PROBE: ${{ inputs.probe-undeclared-requests }}
       run: |
         mapfile -t command < <(printf '%s\n' "$COMMAND" | sed '/^[[:space:]]*$/d')
         report="$RUNNER_TEMP/lsp-touchstone-report.json"
         case "$MODE" in
           client)
-            args=(check check-client --record-file "$RECORD_FILE" --client-command-args "${command[@]}")
+            args=(check check-client --record-file "$RECORD_FILE")
+            if [ "$PROBE" = "true" ]; then
+              args+=(--probe-undeclared-requests)
+            fi
+            args+=(--client-command-args "${command[@]}")
             ;;
           server)
             args=(check check-server --record-file "$RECORD_FILE" --language-id "$LANGUAGE_ID")
@@ -91,9 +99,9 @@ runs:
         {
           echo "### lsp-touchstone ($MODE): \`${command[*]}\`"
           echo
-          lsp-touchstone --output table check check-record --record-file "$RECORD_FILE" || true
+          lsp-touchstone --output table check check-record --target "$MODE" --record-file "$RECORD_FILE" || true
         } >> "$GITHUB_STEP_SUMMARY"
-        jq -r '.Findings[] | "::\(if .Severity == "error" then "error" else "warning" end) title=\(.Code)::\(.Method // "-") (session \(.SessionId), message \(.Seq)): \(.Message)"' "$report"
+        jq -r --arg target "$MODE" '.Findings[] | select(.Party == $target) | "::\(if .Severity == "error" then "error" else "warning" end) title=\(.Code)::\(.Method // "-") (session \(.SessionId), message \(.Seq)): \(.Message)"' "$report"
         {
           echo "errors=$(jq .Errors "$report")"
           echo "warnings=$(jq .Warnings "$report")"

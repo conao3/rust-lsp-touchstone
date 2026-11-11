@@ -12,6 +12,10 @@
 //!   additional edits, snippet, resolve), definition as `Location` or `LocationLink`;
 //! - code actions whose commands send `workspace/applyEdit` (a text edit, a file creation); the
 //!   next `didChange` must produce exactly the edited text.
+//!
+//! With `probe_undeclared_requests` it also sends `window/workDoneProgress/create`,
+//! `client/registerCapability` and `workspace/configuration` to a client that did not declare
+//! them: the client must still answer every request, with a result or an error.
 
 use std::collections::HashMap;
 use std::fs::File;
@@ -26,7 +30,7 @@ use crate::finding::{Finding, Severity};
 use crate::framing::{FrameReader, FramingError};
 use crate::jsonrpc;
 use crate::model::capability;
-use crate::monitor::{Direction, LoggedMessage, Monitor};
+use crate::monitor::{Direction, EndedBy, LoggedMessage, Monitor};
 use crate::position::{self, Encoding};
 use crate::session::write_frame;
 use crate::web::{self, AppState, UiMode};
@@ -39,6 +43,7 @@ const PROGRESS_TOKEN: &str = "lsp-touchstone-progress";
 pub struct ServerOptions {
     pub record: Option<File>,
     pub web_ui_port: Option<u16>,
+    pub probe_undeclared_requests: bool,
 }
 
 /// Serves on stdio until `exit` and returns the exit code (0 after `shutdown`, 1 otherwise).
@@ -57,8 +62,10 @@ pub fn run(options: ServerOptions) -> io::Result<i32> {
         let url = web::serve_in_background(state, port)?;
         eprintln!("{}", json!({"Url": url}));
     }
-    let code = Server::new(Arc::clone(&monitor), io::stdout()).serve(io::stdin())?;
-    monitor.mark_exited(Some(code));
+    let code = Server::new(Arc::clone(&monitor), io::stdout())
+        .probing(options.probe_undeclared_requests)
+        .serve(io::stdin())?;
+    monitor.mark_exited(Some(code), EndedBy::Client);
     Ok(code)
 }
 
@@ -79,6 +86,7 @@ pub struct Server<W> {
     client: Value,
     shutdown: bool,
     awaiting_edit: Option<(String, String)>,
+    probe: bool,
 }
 
 impl<W: Write> Server<W> {
@@ -92,7 +100,15 @@ impl<W: Write> Server<W> {
             client: Value::Null,
             shutdown: false,
             awaiting_edit: None,
+            probe: false,
         }
+    }
+
+    /// Sends the server-to-client requests of the scenario even when the client did not declare
+    /// them.
+    pub fn probing(mut self, probe: bool) -> Self {
+        self.probe = probe;
+        self
     }
 
     pub fn serve(&mut self, input: impl Read) -> io::Result<i32> {
@@ -285,14 +301,14 @@ impl<W: Write> Server<W> {
                 json!({"type": 3, "message": "lsp-touchstone strict server is running"}),
             )?;
         }
-        if self.supports("window.workDoneProgress") {
+        if self.probe || self.supports("window.workDoneProgress") {
             self.send_request(
                 "window/workDoneProgress/create",
                 json!({"token": PROGRESS_TOKEN}),
                 Purpose::ProgressCreate,
             )?;
         }
-        if self.supports("workspace.didChangeWatchedFiles.dynamicRegistration") {
+        if self.probe || self.supports("workspace.didChangeWatchedFiles.dynamicRegistration") {
             self.send_request(
                 "client/registerCapability",
                 json!({"registrations": [{
@@ -303,7 +319,7 @@ impl<W: Write> Server<W> {
                 Purpose::Register,
             )?;
         }
-        if self.supports("workspace.configuration") {
+        if self.probe || self.supports("workspace.configuration") {
             self.send_request(
                 "workspace/configuration",
                 json!({"items": [{"section": "lsp-touchstone"}, {"section": "lsp-touchstone.second"}]}),
@@ -643,5 +659,42 @@ mod tests {
         unique.sort();
         unique.dedup();
         assert_eq!(unique.len(), ids.len(), "{ids:?}");
+    }
+
+    #[test]
+    fn probing_sends_the_requests_the_client_did_not_declare() {
+        let input = [
+            frame(
+                json!({"jsonrpc": "2.0", "id": 1, "method": "initialize", "params": {"processId": null, "rootUri": null, "capabilities": {}}}),
+            ),
+            frame(json!({"jsonrpc": "2.0", "method": "initialized", "params": {}})),
+        ]
+        .concat();
+        let requests = |probe: bool| {
+            let (events, _) = broadcast::channel(256);
+            let monitor = Arc::new(Monitor::new(1, vec![], false, events, None));
+            Server::new(Arc::clone(&monitor), Vec::new())
+                .probing(probe)
+                .serve(input.as_bytes())
+                .unwrap();
+            monitor
+                .messages(None)
+                .into_iter()
+                .filter(|m| {
+                    m.direction == Direction::ServerToClient
+                        && m.kind == Some(jsonrpc::Kind::Request)
+                })
+                .map(|m| m.method.unwrap())
+                .collect::<Vec<_>>()
+        };
+        assert!(requests(false).is_empty());
+        assert_eq!(
+            requests(true),
+            vec![
+                "window/workDoneProgress/create",
+                "client/registerCapability",
+                "workspace/configuration"
+            ]
+        );
     }
 }

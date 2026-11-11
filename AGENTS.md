@@ -40,10 +40,13 @@ proxy, a strict client and a strict server sharing one set of rules.
 - `tests/strict_pair.rs`: the strict client against the strict server; no message may have an
   error.
 - `src/check.rs`: scoring (`check check-client`, `check check-server`, `check check-record`). A
-  record is replayed session by session through a fresh monitor that is then ended, so a session
-  whose server was killed still gets the findings of its end. `server run-server` reads
-  `LSP_TOUCHSTONE_RECORD_FILE` in place of `--record-file` and uses its process id as the session
-  id. `tests/check.rs` runs the commands end to end.
+  record is replayed session by session through a fresh monitor that is then ended by the side its
+  `SessionEnd` line names (the client when the line is missing), so a session whose server was
+  killed still gets the findings of its end. Each finding has the side it is about (`Party`), and a
+  report counts the side under test only. `server run-server` reads `LSP_TOUCHSTONE_RECORD_FILE` in
+  place of `--record-file` and `LSP_TOUCHSTONE_PROBE_UNDECLARED_REQUESTS` in place of
+  `--probe-undeclared-requests`, and uses its process id as the session id. `tests/check.rs` runs
+  the commands end to end.
 - `action.yml`: the composite GitHub Action around `check`; `.github/workflows/action.yml` runs it
   through `uses: $/` on the strict server and on opencode.
 - `docs/agents.md` and `tests/agents/`: the opencode and Claude Code configurations that start the

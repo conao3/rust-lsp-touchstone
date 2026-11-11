@@ -177,3 +177,120 @@ fn a_replayed_record_gets_the_findings_of_its_end() {
     assert_eq!(output.status.code(), Some(255));
     fs::remove_dir_all(dir).unwrap();
 }
+
+#[test]
+fn findings_count_for_the_side_they_are_about() {
+    let dir = scratch("party");
+    let record = dir.join("record.ndjson");
+    let line = |seq: u64, direction: &str, body: Value| {
+        json!({"SessionId": 3, "Seq": seq, "Direction": direction, "Offset": 0, "Body": body.to_string(), "Findings": [], "Auto": false}).to_string()
+    };
+    let lines = [
+        line(
+            1,
+            "client-to-server",
+            json!({"jsonrpc": "2.0", "id": 1, "method": "initialize", "params": {"processId": null, "rootUri": null, "capabilities": {}}}),
+        ),
+        line(
+            2,
+            "server-to-client",
+            json!({"jsonrpc": "2.0", "id": 1, "result": {"capabilities": {}}}),
+        ),
+        line(
+            3,
+            "client-to-server",
+            json!({"jsonrpc": "2.0", "method": "initialized", "params": {}}),
+        ),
+        line(
+            4,
+            "server-to-client",
+            json!({"jsonrpc": "2.0", "id": 1, "method": "workspace/configuration", "params": {"items": [{}]}}),
+        ),
+    ];
+    fs::write(&record, lines.join("\n") + "\n").unwrap();
+    let path = record.to_str().unwrap();
+    let parties = |report: &Value| -> Vec<(String, String)> {
+        report["Findings"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|f| {
+                (
+                    f["Code"].as_str().unwrap().to_string(),
+                    f["Party"].as_str().unwrap().to_string(),
+                )
+            })
+            .collect()
+    };
+
+    let (code, client) = run(&[
+        "check",
+        "check-record",
+        "--target",
+        "client",
+        "--record-file",
+        path,
+    ]);
+    assert_eq!(code, Some(254), "{client:#}");
+    assert_eq!(
+        parties(&client),
+        vec![
+            (
+                "lifecycle/shutdown-not-sent".to_string(),
+                "client".to_string()
+            ),
+            (
+                "capability/client-did-not-declare".to_string(),
+                "server".to_string()
+            ),
+            (
+                "jsonrpc/request-never-answered".to_string(),
+                "client".to_string()
+            ),
+        ]
+    );
+    assert_eq!(client["Errors"], 1);
+    assert_eq!(client["Warnings"], 1);
+    assert_eq!(client["CounterpartFindings"], 1);
+
+    let (code, server) = run(&[
+        "check",
+        "check-record",
+        "--target",
+        "server",
+        "--record-file",
+        path,
+    ]);
+    assert_eq!(code, Some(254), "{server:#}");
+    assert_eq!(server["Errors"], 1);
+    assert_eq!(server["CounterpartFindings"], 2);
+
+    fs::write(
+        &record,
+        lines.join("\n")
+            + "\n"
+            + &json!({"SessionEnd": {"SessionId": 3, "EndedBy": "server", "ExitCode": 1}})
+                .to_string()
+            + "\n",
+    )
+    .unwrap();
+    let (_, ended) = run(&[
+        "check",
+        "check-record",
+        "--target",
+        "client",
+        "--record-file",
+        path,
+    ]);
+    assert_eq!(ended["Sessions"][0]["EndedBy"], "server");
+    assert!(parties(&ended).contains(&(
+        "lifecycle/server-exited-without-exit".to_string(),
+        "server".to_string()
+    )));
+    assert!(
+        !parties(&ended)
+            .iter()
+            .any(|(code, _)| code == "lifecycle/shutdown-not-sent")
+    );
+    fs::remove_dir_all(dir).unwrap();
+}

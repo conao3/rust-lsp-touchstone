@@ -6,6 +6,7 @@
 
 use std::fs::File;
 use std::io::{self, BufReader};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use std::thread;
 
@@ -13,7 +14,7 @@ use serde_json::json;
 use tokio::sync::broadcast;
 
 use crate::framing::{FrameReader, FramingError};
-use crate::monitor::{Direction, Monitor};
+use crate::monitor::{Direction, EndedBy, Monitor};
 use crate::session::{read_stderr, spawn, write_frame};
 use crate::web::{self, AppState, UiMode};
 
@@ -60,8 +61,10 @@ pub fn run(options: ProxyOptions) -> io::Result<i32> {
         let monitor = Arc::clone(&monitor);
         thread::spawn(move || read_stderr(&monitor, server_stderr, true));
     }
+    let client_closed = Arc::new(AtomicBool::new(false));
     {
         let monitor = Arc::clone(&monitor);
+        let client_closed = Arc::clone(&client_closed);
         thread::spawn(move || {
             forward(
                 &monitor,
@@ -69,12 +72,18 @@ pub fn run(options: ProxyOptions) -> io::Result<i32> {
                 &mut server_stdin,
                 Direction::ClientToServer,
             );
+            client_closed.store(true, Ordering::SeqCst);
         });
     }
 
     let status = child.wait()?;
     let _ = to_editor.join();
-    monitor.mark_exited(status.code());
+    let ended_by = if client_closed.load(Ordering::SeqCst) {
+        EndedBy::Client
+    } else {
+        EndedBy::Server
+    };
+    monitor.mark_exited(status.code(), ended_by);
     Ok(status.code().unwrap_or(1))
 }
 

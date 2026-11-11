@@ -44,6 +44,30 @@ pub struct LoggedMessage {
     pub auto: bool,
 }
 
+/// The side that ended a session: the client by closing the stream or ending the server's process,
+/// or the server by exiting on its own.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "lowercase")]
+pub enum EndedBy {
+    Client,
+    Server,
+}
+
+/// The line a record gets when its session ends.
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "PascalCase")]
+struct SessionEnd {
+    session_id: u64,
+    ended_by: EndedBy,
+    exit_code: Option<i32>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+struct SessionEndLine {
+    #[serde(rename = "SessionEnd")]
+    end: SessionEnd,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "lowercase")]
 pub enum SessionState {
@@ -214,9 +238,10 @@ impl Monitor {
         self.emit(&message);
     }
 
-    /// Ends the session: requests still waiting never got a response, a session without
-    /// `shutdown` or a `shutdown` without an `exit` left the server to be ended another way.
-    pub fn mark_exited(&self, exit_code: Option<i32>) {
+    /// Ends the session: requests still waiting never got a response. A client that ended the
+    /// session without `shutdown` or `exit` left the server to be ended another way; a server that
+    /// ended it before `exit` stopped on its own. The record gets a `SessionEnd` line.
+    pub fn mark_exited(&self, exit_code: Option<i32>, ended_by: EndedBy) {
         let mut state = self.state.lock().unwrap();
         if state.state == SessionState::Exited {
             return;
@@ -243,7 +268,34 @@ impl Monitor {
                 ),
             ));
         }
-        if !protocol.shutdown_sent
+        let last_from_server = state
+            .log
+            .iter()
+            .rev()
+            .find(|m| m.direction != Direction::ClientToServer)
+            .map(|m| m.seq);
+        if ended_by == EndedBy::Server
+            && !protocol.exit_sent
+            && let Some(seq) = last_from_server.or(protocol.initialize_seq)
+        {
+            additions.push((
+                seq,
+                Finding::new(
+                    Severity::Warning,
+                    "lifecycle/server-exited-without-exit",
+                    if protocol.shutdown_sent {
+                        "the server ended the session after shutdown without receiving exit"
+                    } else {
+                        "the server ended the session before shutdown and exit"
+                    }
+                    .to_string(),
+                    0,
+                ),
+            ));
+        }
+        let by_client = ended_by == EndedBy::Client || protocol.exit_sent;
+        if by_client
+            && !protocol.shutdown_sent
             && let Some(seq) = protocol.initialize_seq
         {
             additions.push((
@@ -256,7 +308,8 @@ impl Monitor {
                 ),
             ));
         }
-        if protocol.shutdown_sent
+        if by_client
+            && protocol.shutdown_sent
             && !protocol.exit_sent
             && let Some(seq) = protocol.shutdown_seq
         {
@@ -283,6 +336,17 @@ impl Monitor {
         drop(state);
         for message in changed {
             self.emit(&message);
+        }
+        if let Some(record) = &self.record
+            && let Ok(line) = serde_json::to_string(&SessionEndLine {
+                end: SessionEnd {
+                    session_id: self.id,
+                    ended_by,
+                    exit_code,
+                },
+            })
+        {
+            let _ = writeln!(record.lock().unwrap(), "{line}");
         }
         let _ = self.events.send(Event::Session(self.info()));
     }
@@ -1588,7 +1652,7 @@ mod tests {
             "a response after shutdown is allowed"
         );
         f.server(json!({"jsonrpc": "2.0", "id": 9, "method": "client/registerCapability", "params": {"registrations": []}}));
-        f.monitor.mark_exited(None);
+        f.monitor.mark_exited(None, EndedBy::Client);
         let codes: Vec<(String, Vec<&str>)> = f
             .monitor
             .messages(None)
@@ -1726,7 +1790,7 @@ mod tests {
     }
 
     fn session_end(f: &Fixture) -> Vec<&'static str> {
-        f.monitor.mark_exited(None);
+        f.monitor.mark_exited(None, EndedBy::Client);
         f.monitor
             .messages(None)
             .iter()
@@ -1886,6 +1950,72 @@ mod tests {
         assert_eq!(
             f.notify("textDocument/publishDiagnostics", diagnostics),
             wrong
+        );
+    }
+
+    fn end_codes(f: &Fixture, ended_by: EndedBy) -> Vec<&'static str> {
+        f.monitor.mark_exited(None, ended_by);
+        f.monitor
+            .messages(None)
+            .iter()
+            .flat_map(|m| m.findings.iter().map(|x| x.code))
+            .filter(|c| c.starts_with("lifecycle/"))
+            .collect()
+    }
+
+    #[test]
+    fn the_side_that_ended_the_session_gets_the_finding() {
+        let f = Fixture::new(json!({}), json!({}));
+        assert_eq!(
+            end_codes(&f, EndedBy::Client),
+            vec!["lifecycle/shutdown-not-sent"]
+        );
+        let f = Fixture::new(json!({}), json!({}));
+        assert_eq!(
+            end_codes(&f, EndedBy::Server),
+            vec!["lifecycle/server-exited-without-exit"]
+        );
+        let ended = f.monitor.messages(None);
+        let at = ended.iter().find(|m| !m.findings.is_empty()).unwrap();
+        assert_eq!(at.direction, Direction::ServerToClient);
+
+        let mut f = Fixture::new(json!({}), json!({}));
+        f.client_request("shutdown", Value::Null);
+        f.server(json!({"jsonrpc": "2.0", "id": f.next_id, "result": null}));
+        assert_eq!(
+            end_codes(&f, EndedBy::Server),
+            vec!["lifecycle/server-exited-without-exit"]
+        );
+
+        let mut f = Fixture::new(json!({}), json!({}));
+        f.client(json!({"jsonrpc": "2.0", "method": "exit"}));
+        assert_eq!(
+            end_codes(&f, EndedBy::Server),
+            vec!["lifecycle/shutdown-not-sent"]
+        );
+    }
+
+    #[test]
+    fn the_record_ends_with_who_ended_the_session() {
+        let path = std::env::temp_dir().join(format!(
+            "lsp-touchstone-session-end-{}.ndjson",
+            std::process::id()
+        ));
+        let _ = std::fs::remove_file(&path);
+        let record = File::options()
+            .create(true)
+            .append(true)
+            .open(&path)
+            .unwrap();
+        let (events, _) = broadcast::channel(64);
+        let monitor = Monitor::new(9, vec![], false, events, Some(Arc::new(Mutex::new(record))));
+        monitor.mark_exited(Some(3), EndedBy::Server);
+        let text = std::fs::read_to_string(&path).unwrap();
+        std::fs::remove_file(&path).unwrap();
+        let last: Value = serde_json::from_str(text.lines().last().unwrap()).unwrap();
+        assert_eq!(
+            last,
+            json!({"SessionEnd": {"SessionId": 9, "EndedBy": "server", "ExitCode": 3}})
         );
     }
 }

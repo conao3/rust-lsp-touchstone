@@ -45,7 +45,7 @@ run() {
   local messages errors warnings
   # A message whose findings grow later is recorded again; the last line of a seq wins.
   local final="$dir/final.json"
-  jq -s 'group_by(.Seq) | map(last)' "$record" > "$final"
+  jq -s 'map(select(.Seq)) | group_by(.Seq) | map(last)' "$record" > "$final"
   messages=$(jq length "$final")
   errors=$(jq '[.[].Findings[] | select(.Severity == "error")] | length' "$final")
   warnings=$(jq '[.[].Findings[] | select(.Severity == "warning")] | length' "$final")
