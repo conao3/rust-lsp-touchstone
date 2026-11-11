@@ -11,7 +11,9 @@ the features the session exercised.
 
 ## Results
 
-opencode 1.19.5 (nixpkgs) and Claude Code 2.1.319, each run three times with the same outcome.
+opencode 1.19.5 (nixpkgs) and Claude Code 2.1.319, each run three times with the same findings.
+Two of the three Claude Code runs edited the file; the third found it already edited and sent no
+`didChange`.
 
 | Rule | opencode `debug lsp diagnostics` | opencode `debug lsp document-symbols` | Claude Code (`claude -p`) |
 |---|---|---|---|
