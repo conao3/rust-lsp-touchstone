@@ -1,0 +1,7 @@
+{
+  "touchstone": {
+    "command": "lsp-touchstone",
+    "args": ["server", "run-server"],
+    "extensionToLanguage": {".tch": "touchstone"}
+  }
+}

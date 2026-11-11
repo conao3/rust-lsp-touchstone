@@ -1,0 +1,4 @@
+fn main() {
+    let s = "日本😀";
+    println!("{}", s);
+}

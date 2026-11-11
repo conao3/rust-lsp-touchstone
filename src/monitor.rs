@@ -117,6 +117,7 @@ struct Protocol {
     pending_server: HashMap<String, Pending>,
     cancelled: HashSet<String>,
     initialize_answered: bool,
+    initialize_seq: Option<u64>,
     shutdown_sent: bool,
     shutdown_seq: Option<u64>,
     exit_sent: bool,
@@ -213,8 +214,8 @@ impl Monitor {
         self.emit(&message);
     }
 
-    /// Ends the session: requests still waiting never got a response, and a `shutdown` without
-    /// an `exit` left the server to be ended another way.
+    /// Ends the session: requests still waiting never got a response, a session without
+    /// `shutdown` or a `shutdown` without an `exit` left the server to be ended another way.
     pub fn mark_exited(&self, exit_code: Option<i32>) {
         let mut state = self.state.lock().unwrap();
         if state.state == SessionState::Exited {
@@ -238,6 +239,19 @@ impl Monitor {
                         "{} (id {key}) got no response before the session ended",
                         pending.method
                     ),
+                    0,
+                ),
+            ));
+        }
+        if !protocol.shutdown_sent
+            && let Some(seq) = protocol.initialize_seq
+        {
+            additions.push((
+                seq,
+                Finding::new(
+                    Severity::Warning,
+                    "lifecycle/shutdown-not-sent",
+                    "the session ended before the client sent shutdown".to_string(),
                     0,
                 ),
             ));
@@ -718,6 +732,10 @@ impl Check<'_> {
         match method {
             "initialize" if self.from_client => {
                 self.protocol.client_capabilities = params["capabilities"].clone();
+                self.protocol.initialize_seq = key
+                    .as_ref()
+                    .and_then(|k| self.protocol.pending_client.get(k))
+                    .map(|p| p.seq);
             }
             "shutdown" if self.from_client => {
                 self.protocol.shutdown_sent = true;

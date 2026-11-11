@@ -39,6 +39,15 @@ proxy, a strict client and a strict server sharing one set of rules.
   (`nix develop .#editors`); `tests/editors/vscode/node_modules` comes from `npm ci`.
 - `tests/strict_pair.rs`: the strict client against the strict server; no message may have an
   error.
+- `src/check.rs`: scoring (`check check-client`, `check check-server`, `check check-record`). A
+  record is replayed session by session through a fresh monitor that is then ended, so a session
+  whose server was killed still gets the findings of its end. `server run-server` reads
+  `LSP_TOUCHSTONE_RECORD_FILE` in place of `--record-file` and uses its process id as the session
+  id. `tests/check.rs` runs the commands end to end.
+- `action.yml`: the composite GitHub Action around `check`; `.github/workflows/action.yml` runs it
+  through `uses: $/` on the strict server and on opencode.
+- `docs/agents.md` and `tests/agents/`: the opencode and Claude Code configurations that start the
+  strict server for `.tch` files, and what each agent did.
 
 ## Conventions
 

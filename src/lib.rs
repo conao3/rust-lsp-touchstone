@@ -1,3 +1,4 @@
+pub mod check;
 pub mod document;
 pub mod finding;
 pub mod framing;

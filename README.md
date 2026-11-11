@@ -29,6 +29,7 @@ proxy for testing LSP implementations against the specification.
 |---|---|---|
 | Strict client | `client start-web-ui` | A language server. You drive it from a web UI: send requests, notifications and raw frames, open files, and watch each message and finding live. |
 | Checking proxy | `proxy run-proxy` | An editor and a language server together. The proxy sits between them and checks each message on the way. |
+| Scoring | `check check-client`, `check check-server`, `check check-record` | A client or a language server in one command, for CI: it runs the session against the strict counterpart and reports each rule, with an exit code and a record that can be scored again. |
 | Strict server | `server run-server` | An editor. The server drives it through the server-to-client side of the protocol: progress, dynamic registration, configuration, the negotiated position encoding, each completion item shape and `workspace/applyEdit`. It then checks that the edit the editor applied matches what its next `didChange` produces. |
 
 ## What it checks
@@ -102,6 +103,51 @@ editor declared the capability for it. Its code actions run commands that send
 
 [docs/editors.md](docs/editors.md) has the configuration for eglot, lsp-mode, Neovim, Helix and
 VS Code, and what each of them did.
+
+### Scoring a client or a server
+
+```console
+$ lsp-touchstone --output table check check-client --record-file client.ndjson --client-command-args opencode debug lsp document-symbols file:///work/sample.tch
+$ lsp-touchstone --output table check check-server --record-file server.ndjson --open-file src/main.rs --language-id rust --server-command-args rust-analyzer
+$ lsp-touchstone --output table check check-record --record-file client.ndjson
+```
+
+`check-client` runs a client that is configured to start `lsp-touchstone server run-server` as
+its language server, waits for it to exit and scores every session the strict server recorded. The
+strict server finds the record file through the `LSP_TOUCHSTONE_RECORD_FILE` environment variable,
+so the client's configuration needs no path. The client's standard output goes to stderr.
+`check-server` drives a language server with the strict client: `initialize`, `didOpen` of each
+`--open-file`, `documentSymbol` and `hover` when the server declares them, `shutdown` and `exit`.
+`check-record` scores a record written by any mode.
+
+Each session in the record is replayed through the checks and ended, so a session whose server
+was killed still gets the findings that only its end decides (requests never answered, no
+`shutdown`, no `exit`). The report lists every rule of [docs/rules.md](docs/rules.md) with its
+count and an outcome: `violated` (an error), `warned` or `no-finding`. A rule with no finding may
+not have been exercised. The exit code is 254 when a session has an error.
+
+[docs/agents.md](docs/agents.md) has the configuration for opencode and Claude Code, and what each
+of them did.
+
+### GitHub Action
+
+```yaml
+- uses: conao3/rust-lsp-touchstone@master
+  with:
+    mode: server
+    command: |
+      rust-analyzer
+    open-files: src/main.rs
+    language-id: rust
+```
+
+The action builds lsp-touchstone with Nix, runs `check check-client` (`mode: client`) or
+`check check-server` (`mode: server`), writes the table to the job summary and annotates each
+finding. `command` takes one argument per line. Inputs: `record-file`
+(`lsp-touchstone.ndjson`), `open-files`, `language-id`, `fail-on-error` (`true`) and `install-nix`
+(`true`). Outputs: `errors`, `warnings`, `record-file` and `report-file` (the JSON report).
+[.github/workflows/action.yml](.github/workflows/action.yml) runs it on the strict server and on
+opencode.
 
 ### The web UI
 

@@ -1,0 +1,44 @@
+name: Action
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  strict-pair:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7.0.1
+      - uses: $/
+        with:
+          mode: server
+          command: |
+            lsp-touchstone
+            server
+            run-server
+          open-files: tests/agents/sample.tch
+          language-id: rust
+
+  opencode:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7.0.1
+      - run: npm install --global opencode-ai@1.19.5
+      - id: opencode
+        uses: $/
+        with:
+          mode: client
+          fail-on-error: "false"
+          record-file: opencode.ndjson
+          command: |
+            sh
+            -c
+            cd tests/agents && opencode debug lsp diagnostics sample.tch && opencode debug lsp document-symbols "file://$PWD/sample.tch"
+      - uses: actions/upload-artifact@v7.0.2
+        with:
+          name: opencode-record
+          path: opencode.ndjson

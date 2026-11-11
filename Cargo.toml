@@ -10,7 +10,7 @@ repository = "https://github.com/conao3/rust-lsp-touchstone"
 async-graphql = "7"
 async-graphql-axum = "7"
 axum = "0.8"
-clap = { version = "4", features = ["derive"] }
+clap = { version = "4", features = ["derive", "env"] }
 futures-util = "0.3"
 lean-rust = "0.3.0"
 serde = { version = "1", features = ["derive"] }

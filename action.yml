@@ -1,0 +1,104 @@
+name: lsp-touchstone
+description: Score an LSP client or language server against lsp-touchstone's strict counterpart, rule by rule
+author: conao3
+branding:
+  icon: check-circle
+  color: blue
+
+inputs:
+  mode:
+    description: >-
+      `client` runs `command`, a client configured to start `lsp-touchstone server run-server` as its
+      language server. `server` drives the language server `command` with the strict client.
+    required: true
+  command:
+    description: The command to run, one argument per line.
+    required: true
+  record-file:
+    description: The record file to write (one JSON line per message).
+    default: lsp-touchstone.ndjson
+  open-files:
+    description: In `server` mode, the files to open, one per line.
+    default: ""
+  language-id:
+    description: In `server` mode, the languageId of the opened files.
+    default: plaintext
+  fail-on-error:
+    description: Fail the step when a session has an error.
+    default: "true"
+  install-nix:
+    description: Install Nix first; set to false when the job already has it.
+    default: "true"
+
+outputs:
+  errors:
+    description: The number of errors.
+    value: ${{ steps.check.outputs.errors }}
+  warnings:
+    description: The number of warnings.
+    value: ${{ steps.check.outputs.warnings }}
+  record-file:
+    description: The record file.
+    value: ${{ inputs.record-file }}
+  report-file:
+    description: The JSON report.
+    value: ${{ steps.check.outputs.report-file }}
+
+runs:
+  using: composite
+  steps:
+    - if: inputs.install-nix == 'true'
+      uses: cachix/install-nix-action@v31.11.3
+    - shell: bash
+      run: |
+        nix build "path:$GITHUB_ACTION_PATH" --out-link "$RUNNER_TEMP/lsp-touchstone"
+        echo "$RUNNER_TEMP/lsp-touchstone/bin" >> "$GITHUB_PATH"
+    - id: check
+      shell: bash
+      env:
+        MODE: ${{ inputs.mode }}
+        COMMAND: ${{ inputs.command }}
+        RECORD_FILE: ${{ inputs.record-file }}
+        OPEN_FILES: ${{ inputs.open-files }}
+        LANGUAGE_ID: ${{ inputs.language-id }}
+        FAIL_ON_ERROR: ${{ inputs.fail-on-error }}
+      run: |
+        mapfile -t command < <(printf '%s\n' "$COMMAND" | sed '/^[[:space:]]*$/d')
+        report="$RUNNER_TEMP/lsp-touchstone-report.json"
+        case "$MODE" in
+          client)
+            args=(check check-client --record-file "$RECORD_FILE" --client-command-args "${command[@]}")
+            ;;
+          server)
+            args=(check check-server --record-file "$RECORD_FILE" --language-id "$LANGUAGE_ID")
+            while IFS= read -r file; do
+              [ -n "$file" ] && args+=(--open-file "$file")
+            done <<< "$OPEN_FILES"
+            args+=(--server-command-args "${command[@]}")
+            ;;
+          *)
+            echo "::error::mode is client or server, not $MODE"
+            exit 1
+            ;;
+        esac
+        set +e
+        lsp-touchstone "${args[@]}" > "$report"
+        code=$?
+        set -e
+        if [ "$code" -ne 0 ] && [ "$code" -ne 254 ]; then
+          exit "$code"
+        fi
+        {
+          echo "### lsp-touchstone ($MODE): \`${command[*]}\`"
+          echo
+          lsp-touchstone --output table check check-record --record-file "$RECORD_FILE" || true
+        } >> "$GITHUB_STEP_SUMMARY"
+        jq -r '.Findings[] | "::\(if .Severity == "error" then "error" else "warning" end) title=\(.Code)::\(.Method // "-") (session \(.SessionId), message \(.Seq)): \(.Message)"' "$report"
+        {
+          echo "errors=$(jq .Errors "$report")"
+          echo "warnings=$(jq .Warnings "$report")"
+          echo "report-file=$report"
+        } >> "$GITHUB_OUTPUT"
+        if [ "$code" -eq 254 ] && [ "$FAIL_ON_ERROR" = "true" ]; then
+          exit 254
+        fi

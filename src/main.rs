@@ -3,10 +3,12 @@ use std::io::{self, BufReader, Write};
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 use std::sync::Arc;
+use std::time::Duration;
 
 use clap::{Parser, Subcommand, ValueEnum};
 use serde::Serialize;
 
+use lsp_touchstone::check::{self, Outcome, Report, ServerCheck};
 use lsp_touchstone::finding::{Finding, Severity};
 use lsp_touchstone::framing::{Frame, FrameReader, FramingError};
 use lsp_touchstone::web;
@@ -55,6 +57,54 @@ enum Command {
         #[command(subcommand)]
         command: ClientCommand,
     },
+    /// Score a client or a server against the strict counterpart, or score a record.
+    Check {
+        #[command(subcommand)]
+        command: CheckCommand,
+    },
+}
+
+#[derive(Subcommand)]
+#[allow(clippy::enum_variant_names)]
+enum CheckCommand {
+    /// Run a client configured to start `lsp-touchstone server run-server` as its language
+    /// server, then score every session the strict server recorded. The server finds the record
+    /// file through LSP_TOUCHSTONE_RECORD_FILE. The client's standard output goes to stderr.
+    CheckClient {
+        /// The record file to write; it is emptied first.
+        #[arg(long)]
+        record_file: PathBuf,
+        /// The client and its arguments; put this parameter last.
+        #[arg(long, num_args = 1.., required = true, allow_hyphen_values = true)]
+        client_command_args: Vec<String>,
+    },
+    /// Drive a language server with the strict client (initialize, open each file, ask for its
+    /// symbols and a hover, shut down, exit) and score the session.
+    CheckServer {
+        /// The record file to write; it is emptied first.
+        #[arg(long)]
+        record_file: PathBuf,
+        /// A file to open; repeat for more.
+        #[arg(long)]
+        open_file: Vec<PathBuf>,
+        /// The languageId of the opened files.
+        #[arg(long, default_value = "plaintext")]
+        language_id: String,
+        /// Seconds to wait for each round of responses and for the server to exit.
+        #[arg(long, default_value_t = 30)]
+        timeout_seconds: u64,
+        /// Seconds to keep the session open after the requests are answered.
+        #[arg(long, default_value_t = 1)]
+        settle_seconds: u64,
+        /// The language server and its arguments; put this parameter last.
+        #[arg(long, num_args = 1.., required = true, allow_hyphen_values = true)]
+        server_command_args: Vec<String>,
+    },
+    /// Score a record written by any mode (`--record-file`), replaying each session.
+    CheckRecord {
+        #[arg(long)]
+        record_file: PathBuf,
+    },
 }
 
 #[derive(Subcommand)]
@@ -83,7 +133,7 @@ enum ServerCommand {
         #[arg(long)]
         web_ui_port: Option<u16>,
         /// Append every message as one JSON line to this file.
-        #[arg(long)]
+        #[arg(long, env = "LSP_TOUCHSTONE_RECORD_FILE")]
         record_file: Option<PathBuf>,
     },
 }
@@ -124,7 +174,9 @@ fn main() -> ExitCode {
     let mut args: Vec<std::ffi::OsString> = std::env::args_os().collect();
     if args.len() > 2
         && args.last().is_some_and(|a| a == "help")
-        && !args.iter().any(|a| a == "--server-command-args")
+        && !args
+            .iter()
+            .any(|a| a == "--server-command-args" || a == "--client-command-args")
     {
         *args.last_mut().unwrap() = "--help".into();
     }
@@ -190,7 +242,110 @@ fn run(cli: &Cli) -> io::Result<ExitCode> {
             print!("{}", web::schema_sdl());
             Ok(ExitCode::SUCCESS)
         }
+        Command::Check {
+            command:
+                CheckCommand::CheckClient {
+                    record_file,
+                    client_command_args,
+                },
+        } => print_report(
+            &check::check_client(client_command_args, record_file)?,
+            cli.output,
+        ),
+        Command::Check {
+            command:
+                CheckCommand::CheckServer {
+                    record_file,
+                    open_file,
+                    language_id,
+                    timeout_seconds,
+                    settle_seconds,
+                    server_command_args,
+                },
+        } => print_report(
+            &check::check_server(&ServerCheck {
+                command: server_command_args.clone(),
+                record_file: record_file.clone(),
+                open_files: open_file.clone(),
+                language_id: language_id.clone(),
+                timeout: Duration::from_secs(*timeout_seconds),
+                settle: Duration::from_secs(*settle_seconds),
+            })?,
+            cli.output,
+        ),
+        Command::Check {
+            command: CheckCommand::CheckRecord { record_file },
+        } => print_report(&check::score_record(record_file)?, cli.output),
     }
+}
+
+fn count(n: usize, noun: &str) -> String {
+    if n == 1 {
+        format!("1 {noun}")
+    } else {
+        format!("{n} {noun}s")
+    }
+}
+
+fn print_report(report: &Report, output: Output) -> io::Result<ExitCode> {
+    let mut out = io::stdout().lock();
+    match output {
+        Output::Json => {
+            serde_json::to_writer_pretty(&mut out, report)?;
+            writeln!(out)?;
+        }
+        Output::Text => {
+            for f in &report.findings {
+                writeln!(
+                    out,
+                    "{}\t{}\t{}\t{}\t{}",
+                    f.session_id, f.seq, f.severity, f.code, f.message
+                )?;
+            }
+        }
+        Output::Table => {
+            writeln!(
+                out,
+                "{}, {} in {} (record: {})",
+                count(report.errors, "error"),
+                count(report.warnings, "warning"),
+                count(report.sessions.len(), "session"),
+                report.record_file
+            )?;
+            let rows: Vec<[String; 4]> = report
+                .rules
+                .iter()
+                .filter(|r| r.outcome != Outcome::NoFinding)
+                .map(|r| {
+                    let first = report
+                        .findings
+                        .iter()
+                        .find(|f| f.code == r.code)
+                        .map(|f| f.message.clone())
+                        .unwrap_or_default();
+                    [
+                        r.code.clone(),
+                        r.severity.clone(),
+                        r.count.to_string(),
+                        first,
+                    ]
+                })
+                .collect();
+            if !rows.is_empty() {
+                writeln!(out)?;
+                write_rows(
+                    &mut out,
+                    ["Code", "Severity", "Count", "First message"],
+                    &rows,
+                )?;
+            }
+        }
+    }
+    Ok(if report.errors > 0 {
+        ExitCode::from(EXIT_VIOLATION)
+    } else {
+        ExitCode::SUCCESS
+    })
 }
 
 fn check_frames(input_file: &PathBuf, output: Output) -> io::Result<ExitCode> {
@@ -252,7 +407,6 @@ fn all_findings(result: &CheckFramesResult) -> Vec<&Finding> {
 }
 
 fn write_table(out: &mut impl Write, findings: &[&Finding]) -> io::Result<()> {
-    let header = ["Offset", "Severity", "Code", "Message"];
     let rows: Vec<[String; 4]> = findings
         .iter()
         .map(|f| {
@@ -264,8 +418,12 @@ fn write_table(out: &mut impl Write, findings: &[&Finding]) -> io::Result<()> {
             ]
         })
         .collect();
+    write_rows(out, ["Offset", "Severity", "Code", "Message"], &rows)
+}
+
+fn write_rows(out: &mut impl Write, header: [&str; 4], rows: &[[String; 4]]) -> io::Result<()> {
     let mut widths = header.map(str::len);
-    for row in &rows {
+    for row in rows {
         for (width, cell) in widths.iter_mut().zip(row) {
             *width = (*width).max(cell.chars().count());
         }
@@ -281,7 +439,7 @@ fn write_table(out: &mut impl Write, findings: &[&Finding]) -> io::Result<()> {
     writeln!(out, "{}", line(header))?;
     let rule: Vec<String> = widths.iter().map(|w| "-".repeat(*w)).collect();
     writeln!(out, "|-{}-|", rule.join("-|-"))?;
-    for row in &rows {
+    for row in rows {
         writeln!(out, "{}", line(row.each_ref().map(String::as_str)))?;
     }
     Ok(())

@@ -46,7 +46,7 @@ pub fn run(options: ServerOptions) -> io::Result<i32> {
     let (events, _) = broadcast::channel(4096);
     let record = options.record.map(|f| Arc::new(Mutex::new(f)));
     let monitor = Arc::new(Monitor::new(
-        1,
+        u64::from(std::process::id()),
         vec!["lsp-touchstone".to_string(), "server".to_string()],
         false,
         events.clone(),

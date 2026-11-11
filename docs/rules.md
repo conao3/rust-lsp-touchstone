@@ -58,6 +58,7 @@ The base protocol: a header part of `Name: value\r\n` fields ended by `\r\n`, th
 | `lifecycle/client-message-before-initialize-result` | error | Until the server answers `initialize`, the client sends no other request or notification (except `exit`); responses to the server's requests are allowed. |
 | `lifecycle/server-message-before-initialize-result` | error | Until it answers `initialize`, the server sends only `window/showMessage`, `window/logMessage`, `telemetry/event`, `window/showMessageRequest` and `$/progress`. |
 | `lifecycle/client-message-after-shutdown` | error | After `shutdown`, the client sends no request or notification but `exit`; responses to the server's requests are allowed. |
+| `lifecycle/shutdown-not-sent` | warning | A client that is done with the server sends `shutdown` before `exit`; a session that ends without it left the server to be ended another way. |
 | `lifecycle/exit-not-sent` | warning | After `shutdown` the client sends `exit`; a client that kills the server instead skips the server's own cleanup. |
 
 ## Types
