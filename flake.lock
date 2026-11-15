@@ -197,16 +197,18 @@
         "treefmt-nix": "treefmt-nix"
       },
       "locked": {
-        "lastModified": 1794200464,
-        "narHash": "sha256-Q3tW0OeQgrF2RJ7m5YUO8vov2oWlUG7FSAvrtD1g8pA=",
+        "dir": "Rust",
+        "lastModified": 1794478018,
+        "narHash": "sha256-hVMpeJ/d2uGEHsbKnZHi8focK3t5GJKweYnQqlZZAV4=",
         "owner": "conao3",
         "repo": "lean-rs",
-        "rev": "4602d73a661b90df0eb08576c5f9b1dc68d2e18e",
+        "rev": "f916ea9e7e1747281e161255562f1ae8c29601a5",
         "type": "github"
       },
       "original": {
+        "dir": "Rust",
         "owner": "conao3",
-        "ref": "v0.3.0",
+        "ref": "v0.5.0",
         "repo": "lean-rs",
         "type": "github"
       }
@@ -337,11 +339,11 @@
     },
     "nixpkgs_5": {
       "locked": {
-        "lastModified": 1793977579,
-        "narHash": "sha256-WrSODdZFVIs/Hh2NzC0bY+ROByi0bATg8WfePX8dPj8=",
+        "lastModified": 1794554816,
+        "narHash": "sha256-PqJ89Z/qwQa2fB2C0j/GjiviARAtBzVPDUxnbIY6EPA=",
         "owner": "NixOS",
         "repo": "nixpkgs",
-        "rev": "4fe25e12eb9f4c744966dd3de5a05246cf098601",
+        "rev": "e126e9e73c335158ff8279ac14d5f4afec153716",
         "type": "github"
       },
       "original": {

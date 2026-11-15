@@ -12,7 +12,7 @@ async-graphql-axum = "7"
 axum = "0.8"
 clap = { version = "4", features = ["derive", "env"] }
 futures-util = "0.3"
-lean-rust = "0.3.0"
+lean-rust = "0.5.0"
 serde = { version = "1", features = ["derive"] }
 serde_json = { version = "1", features = ["preserve_order"] }
 tokio = { version = "1", features = ["macros", "net", "rt-multi-thread", "sync"] }
@@ -20,4 +20,4 @@ tokio-stream = { version = "0.1", features = ["sync"] }
 url = "2"
 
 [build-dependencies]
-lean-rust-build = "0.3.0"
+lean-rust-build = "0.5.0"

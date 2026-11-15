@@ -5,7 +5,7 @@
     nixpkgs.url = "github:NixOS/nixpkgs/nixpkgs-unstable";
     flake-parts.url = "github:hercules-ci/flake-parts";
     treefmt-nix.url = "github:numtide/treefmt-nix";
-    lean-rs.url = "github:conao3/lean-rs/v0.3.0";
+    lean-rs.url = "github:conao3/lean-rs/v0.5.0?dir=Rust";
     lean-rs.inputs.nixpkgs.follows = "nixpkgs";
   };
 
