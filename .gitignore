@@ -5,3 +5,4 @@ result
 /test-out
 node_modules
 /mutants.out*
+/audit/.lake

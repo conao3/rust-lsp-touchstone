@@ -2,6 +2,10 @@
 check:
 	nix fmt -- --ci
 	cargo clippy --all-targets -- -D warnings
+	lake -d lean build --wfail
+	lake -d audit build --wfail
+	git diff --exit-code -- .lean-rust lean
+	test -z "$$(git ls-files --others --exclude-standard -- .lean-rust lean)"
 	cargo test
 
 # Runs eglot, lsp-mode, Neovim, Helix and VS Code against the strict server and against

@@ -64,12 +64,83 @@ proxy, a strict client and a strict server sharing one set of rules.
   without Lean (`nix build`, CI). Rules that should be proved correct are written in `lean!`.
 - Commit messages, comments and docs are in English.
 
+## Lean and Rust
+
+Lean defines position conversion, document range replacement and progress transitions in
+the `lean!` blocks. Rust converts their arguments and owns protocol I/O, document storage
+and reporting. The generated functions called from Rust are `proved.resolve` and
+`proved.offset` in `src/position.rs`, `proved.replace_range` (`replaceRange` in Lean) in
+`src/document.rs`, and `proved.step` in `src/progress.rs`.
+
+The position theorems are:
+
+- `unitWidth_pos`: every scalar consumes at least one code unit.
+- `unitWidth_spec`: scalar widths agree with UTF-8, UTF-16 and UTF-32.
+- `resolve_offset`: converting a valid list index to code units and back preserves the index.
+- `resolve_beyond`: offsets beyond the list's encoded length clamp to its end.
+- `resolve_splits`: a reported split lies strictly inside the indexed scalar.
+- `resolve_inside`: every offset strictly inside a scalar reports that split.
+- `resolve_offset_roundtrip`: the String API preserves a valid index on an offset/resolve round trip.
+- `resolve_clamps_past_end`: the String API clamps offsets beyond the line to its length.
+- `resolve_inside_character`: the String API reports every offset strictly inside a scalar.
+- `resolve_split_bounds`: every split reported by the String API names a scalar containing the offset.
+
+The document theorems are:
+
+- `replace_keeps_prefix`: list replacement preserves the characters before the range.
+- `replace_keeps_suffix`: list replacement preserves the characters after the range.
+- `replace_inserts`: list replacement puts the entire insertion at the range's start.
+- `replace_length`: the result's length subtracts the removed range and adds the insertion.
+- `replace_with_same_is_identity`: inserting the range's own contents preserves the list.
+- `replace_whole`: replacing the entire list yields the insertion.
+- `replaceRange_keeps_prefix`: String replacement preserves the prefix before the range.
+- `replaceRange_keeps_suffix`: String replacement preserves the suffix after the range.
+- `replaceRange_inserts`: String replacement contains the entire insertion at the requested start.
+- `replaceRange_length`: String replacement has the expected scalar count for a valid range.
+- `replaceRange_with_same_is_identity`: replacing a String range with its own contents preserves it.
+- `replaceRange_whole`: replacing the entire String yields the insertion.
+
+The progress theorems are:
+
+- `ended_accepts_nothing`: an ended token rejects every progress event.
+- `only_begin_leaves_created`: a successful first event begins the token.
+- `only_report_or_end_leave_begun`: a begun token accepts reports or completion with their required states.
+- `begun_never_returns_to_created`: an event cannot reset a begun token to created.
+- `nothing_after_end`: every nonempty sequence after completion is rejected.
+- `accepted_runs_begin_first`: every accepted nonempty sequence starts with begin.
+- `begin_reports_end`: begin, any number of reports and completion reach the ended state.
+
+`audit/` is a separate Lake package requiring `../lean` and
+[lean-assay](https://github.com/conao3/lean-assay) at
+`ef054d7c45ab4f9e14a201ae7e3bfbe9dd080abb`. Its three modules import each generated
+`proved` namespace separately. The audit covers all four generated functions called from
+Rust; every additional generated entry point needs useful theorems and an `#assay` line.
+`lake -d audit build --wfail` rejects missing theorems, holes, vacuous hypotheses and functions
+whose theorems reject zero mutants. Equivalence describes the inputs tried by the audit.
+The position audit builds strings from Assay's Unicode character generator, covering every
+UTF-8 and UTF-16 width, and derives `Inhabited Resolution` locally to enable its default-value
+mutant. These instances apply to the audit module.
+
+| Function | Mutants | Killed | Holes | Untested | Equivalent | Timed out | Stillborn |
+|---|---:|---:|---:|---:|---:|---:|---:|
+| `step` | 19 | 19 | 0 | 0 | 0 | 0 | 0 |
+| `resolve` | 1 | 1 | 0 | 0 | 0 | 0 | 0 |
+| `offset` | 3 | 3 | 0 | 0 | 0 | 0 | 0 |
+| `replaceRange` | 3 | 3 | 0 | 0 | 0 | 0 | 0 |
+
+All four entry points participate in the audit. Their helper functions have the list-level
+and transition theorems listed above; the String theorems lift those properties to the API.
+
 ## Verification
 
 ```console
 $ nix develop --command make check
 $ nix build
 ```
+
+`make check` runs treefmt, clippy (including regeneration), `lake -d lean build --wfail`,
+`lake -d audit build --wfail`, tracked and untracked generated-file consistency checks, and
+all Rust tests. Commit `lean/`, `.lean-rust/cache/` and the audit manifest with source changes.
 
 After changing a check, run `make check-editors` and update the results in `docs/editors.md`.
 

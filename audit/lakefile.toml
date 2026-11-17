@@ -1,0 +1,15 @@
+name = "lsp-touchstone-audit"
+defaultTargets = ["Audit"]
+
+[[lean_lib]]
+name = "Audit"
+globs = ["Audit.+"]
+
+[[require]]
+name = "lsp_touchstone"
+path = "../lean"
+
+[[require]]
+name = "assay"
+git = "https://github.com/conao3/lean-assay"
+rev = "ef054d7c45ab4f9e14a201ae7e3bfbe9dd080abb"

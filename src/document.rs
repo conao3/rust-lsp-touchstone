@@ -49,6 +49,44 @@ lean_rust::lean! {
     def replaceRange (text : String) (start stop : Nat) (insert : String) : String :=
       String.ofList (replaceList text.toList start stop insert.toList)
 
+    theorem replaceRange_keeps_prefix (text insert : String) (start stop : Nat)
+        (h : start ≤ text.toList.length) :
+        (replaceRange text start stop insert).toList.take start = text.toList.take start := by
+      simpa only [replaceRange, String.toList_ofList] using
+        replace_keeps_prefix text.toList insert.toList start stop h
+
+    theorem replaceRange_keeps_suffix (text insert : String) (start stop : Nat)
+        (h : start ≤ text.toList.length) :
+        (replaceRange text start stop insert).toList.drop (start + insert.toList.length) =
+          text.toList.drop stop := by
+      simpa only [replaceRange, String.toList_ofList] using
+        replace_keeps_suffix text.toList insert.toList start stop h
+
+    theorem replaceRange_inserts (text insert : String) (start stop : Nat)
+        (h : start ≤ text.toList.length) :
+        ((replaceRange text start stop insert).toList.drop start).take insert.toList.length =
+          insert.toList := by
+      simpa only [replaceRange, String.toList_ofList] using
+        replace_inserts text.toList insert.toList start stop h
+
+    theorem replaceRange_length (text insert : String) (start stop : Nat)
+        (h1 : start ≤ stop) (h2 : stop ≤ text.toList.length) :
+        (replaceRange text start stop insert).toList.length =
+          text.toList.length - (stop - start) + insert.toList.length := by
+      simpa only [replaceRange, String.toList_ofList] using
+        replace_length text.toList insert.toList start stop h1 h2
+
+    theorem replaceRange_with_same_is_identity (text : String) (start stop : Nat)
+        (h : start ≤ stop) :
+        replaceRange text start stop
+          (String.ofList ((text.toList.drop start).take (stop - start))) = text := by
+      simp only [replaceRange, String.toList_ofList,
+        replace_with_same_is_identity text.toList start stop h, String.ofList_toList]
+
+    theorem replaceRange_whole (text insert : String) :
+        replaceRange text 0 text.toList.length insert = insert := by
+      simp only [replaceRange, replace_whole, String.ofList_toList]
+
     "#
 }
 #[derive(Debug, Clone)]

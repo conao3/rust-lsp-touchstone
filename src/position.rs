@@ -152,6 +152,25 @@ lean_rust::lean! {
     def offset (e : Encoding) (line : String) (chars : Nat) : Nat :=
       offsetList e line.toList chars
 
+    theorem resolve_offset_roundtrip (e : Encoding) (line : String) (i : Nat)
+        (h : i ≤ line.toList.length) : resolve e line (offset e line i) = .exact i := by
+      exact resolve_offset e line.toList i h
+
+    theorem resolve_clamps_past_end (e : Encoding) (line : String) (n : Nat)
+        (h : offset e line line.toList.length < n) :
+        resolve e line n = .clamped line.toList.length := by
+      exact resolve_beyond e line.toList n h
+
+    theorem resolve_inside_character (e : Encoding) (line : String) (i n : Nat)
+        (hi : i < line.toList.length) (h1 : offset e line i < n)
+        (h2 : n < offset e line (i + 1)) : resolve e line n = .splitsChar i := by
+      exact resolve_inside e line.toList i n hi h1 h2
+
+    theorem resolve_split_bounds (e : Encoding) (line : String) (n i : Nat)
+        (h : resolve e line n = .splitsChar i) :
+        i < line.toList.length ∧ offset e line i < n ∧ n < offset e line (i + 1) := by
+      exact resolve_splits e line.toList n i h
+
     "#
 }
 
