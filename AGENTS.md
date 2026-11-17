@@ -111,7 +111,7 @@ The progress theorems are:
 - `begin_reports_end`: begin, any number of reports and completion reach the ended state.
 
 `audit/` is a separate Lake package requiring `../lean` and
-[lean-assay](https://github.com/conao3/lean-assay) at
+[leanassay](https://github.com/conao3/lean-leanassay) at
 `ef054d7c45ab4f9e14a201ae7e3bfbe9dd080abb`. Its three modules import each generated
 `proved` namespace separately. The audit covers all four generated functions called from
 Rust; every additional generated entry point needs useful theorems and an `#assay` line.

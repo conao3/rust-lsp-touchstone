@@ -199,7 +199,7 @@ $ nix run . -- help
 
 `make check` runs treefmt, clippy, the Lean proofs, their mutation audit, generated-code
 consistency checks and `cargo test`. The `audit/` Lake package uses
-[lean-assay](https://github.com/conao3/lean-assay) to check that the theorems reject broken
+[leanassay](https://github.com/conao3/lean-leanassay) to check that the theorems reject broken
 implementations of every generated function called from Rust, with warnings treated as errors.
 `make check-editors` runs eglot,
 lsp-mode, Neovim, Helix and VS Code (VSCodium) in the `editors` dev shell, against the strict
