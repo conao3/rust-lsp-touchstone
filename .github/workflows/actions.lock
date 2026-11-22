@@ -9,7 +9,7 @@ workflows:
         - 'cachix/install-nix-action@v31.11.5'
     '.github/workflows/ci.yml':
         - 'actions/checkout@v7.0.1'
-        - 'cachix/install-nix-action@v31.11.5'
+        - 'cachix/install-nix-action@v32.0.0'
 dependencies:
     'actions/checkout@v7.0.1':
         ref: 'v7.0.1'
@@ -24,5 +24,10 @@ dependencies:
     'cachix/install-nix-action@v31.11.5':
         ref: 'v31.11.5'
         commit: 'sha1-3dc140bfc76c49fbd4dd958429132e3746bcb086'
+        owner_id: 36824654
+        repo_id: 212301524
+    'cachix/install-nix-action@v32.0.0':
+        ref: 'v32.0.0'
+        commit: 'sha1-bb0495a1086c46893eee56f32fd192dfe4a15bb9'
         owner_id: 36824654
         repo_id: 212301524
