@@ -51,7 +51,7 @@ runs:
   using: composite
   steps:
     - if: inputs.install-nix == 'true'
-      uses: cachix/install-nix-action@v31.11.5
+      uses: cachix/install-nix-action@v32.0.0
     - shell: bash
       run: |
         nix build "path:$GITHUB_ACTION_PATH" --out-link "$RUNNER_TEMP/lsp-touchstone"
