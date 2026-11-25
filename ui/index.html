@@ -264,7 +264,7 @@ function applyMode(mode) {
     $("command").title = mode === "PROXY"
       ? "The language server behind the proxy; the editor drives this session"
       : "The strict server; the editor drives this session";
-    document.title = `lsp-touchstone · ${mode.toLowerCase()}`;
+    document.title = `lsp-touchstone, ${mode.toLowerCase()}`;
   }
 }
 
@@ -276,10 +276,10 @@ function renderSession() {
     badge.textContent = "not started";
     badge.className = "badge";
   } else if (running) {
-    badge.textContent = `running · session ${s.id}`;
+    badge.textContent = `running, session ${s.id}`;
     badge.className = "badge running";
   } else {
-    badge.textContent = `exited${s.exitCode === null ? "" : ` (${s.exitCode})`} · session ${s.id}`;
+    badge.textContent = `exited${s.exitCode === null ? "" : ` (${s.exitCode})`}, session ${s.id}`;
     badge.className = "badge exited";
   }
   if (s && (!$("command").value || state.mode !== "CLIENT")) $("command").value = s.command.join(" ");
@@ -365,7 +365,7 @@ function renderList() {
 
 function updateCounts() {
   const errors = state.errorCount;
-  $("counts").textContent = `${state.messages.length} message${state.messages.length === 1 ? "" : "s"} · ${errors} error${errors === 1 ? "" : "s"}`;
+  $("counts").textContent = `${state.messages.length} message${state.messages.length === 1 ? "" : "s"}, ${errors} error${errors === 1 ? "" : "s"}`;
   $("counts").className = errors ? "badge error" : "badge";
   $("list-empty").hidden = state.messages.length > 0;
 }
@@ -464,15 +464,15 @@ function renderDetail() {
   h.textContent = `#${m.seq} ${kindLabel(m)} ${m.method || ""}`;
   const meta = document.createElement("div");
   meta.className = "meta";
-  meta.append(arrow(m), ` · ${(m.timeMs / 1000).toFixed(3)} s`);
-  if (m.id) meta.append(` · id ${m.id}`);
-  if (m.auto) meta.append(" · sent automatically");
+  meta.append(arrow(m), `, ${(m.timeMs / 1000).toFixed(3)} s`);
+  if (m.id) meta.append(`, id ${m.id}`);
+  if (m.auto) meta.append(", sent automatically");
   for (const p of partnerSeqs(m.seq)) {
     const a = document.createElement("a");
     a.className = "link";
     a.textContent = `#${p}`;
     a.addEventListener("click", () => select(p));
-    meta.append(" · paired with ", a);
+    meta.append(", paired with ", a);
   }
   const findings = m.findings.map((f) => {
     const div = document.createElement("div");

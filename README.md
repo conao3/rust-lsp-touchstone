@@ -13,10 +13,10 @@
 </p>
 
 <p align="center">
-  <a href="#install">Install</a> ·
-  <a href="#usage">Usage</a> ·
-  <a href="docs/rules.md">Rules</a> ·
-  <a href="docs/editors.md">Editors</a> ·
+  <a href="#install">Install</a> |
+  <a href="#usage">Usage</a> |
+  <a href="docs/rules.md">Rules</a> |
+  <a href="docs/editors.md">Editors</a> |
   <a href="#development">Development</a>
 </p>
 
